@@ -24,6 +24,7 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.image.WritableImage;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
@@ -33,6 +34,7 @@ import javafx.scene.paint.Color;
 import javafx.scene.paint.CycleMethod;
 import javafx.scene.paint.LinearGradient;
 import javafx.scene.paint.Stop;
+import javafx.scene.shape.StrokeLineCap;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.transform.Affine;
@@ -44,7 +46,9 @@ import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiFunction;
 
 public class EditorController {
 
@@ -139,6 +143,9 @@ public class EditorController {
     private java.util.Stack<EditorState> redoStack = new java.util.Stack<>();
     private long ignoreUpdatesUntil = 0;
     private Map<String, List<DrawingShape>> annotationsCache = new HashMap<>();
+
+    @FXML private ProgressBar exportProgressBar; // Nueva barra en tu FXML
+    @FXML private Label lblStatus; // Label para mensajes como "Generando frame 1/5..."
 
     // =========================================================================
     //                               INICIALIZACIÓN
@@ -262,6 +269,9 @@ public class EditorController {
         } else {
             System.out.println("⚠️ Aviso: No hay token. La subida fallará si el backend requiere auth.");
         }
+
+        if (exportProgressBar != null) exportProgressBar.setVisible(false);
+        if (lblStatus != null) lblStatus.setText("");
     }
 
     @FXML
@@ -1862,54 +1872,88 @@ public class EditorController {
     @FXML
     public void onExportVideo() {
         if (serverVideoId == null) {
-            // Mostrar error si no se ha subido el video aún
+            mostrarAlerta("Error", "Sube el video primero.");
             return;
         }
 
         FileChooser fc = new FileChooser();
-        fc.setInitialFileName("analisis_final.mp4");
+        fc.setInitialFileName("analisis_tactico.mp4");
         File destFile = fc.showSaveDialog(container.getScene().getWindow());
         if (destFile == null) return;
 
+        // Mostrar UI de progreso
         if (loadingSpinner != null) loadingSpinner.setVisible(true);
+        if (exportProgressBar != null) {
+            exportProgressBar.setVisible(true);
+            exportProgressBar.setProgress(0);
+        }
 
         new Thread(() -> {
             try {
                 List<ExportItem> items = new ArrayList<>();
+                int totalSegments = segments.size();
 
-                // 1. RECORRER SEGMENTOS
-                for (VideoSegment seg : segments) {
+                // --- FASE 1: GENERACIÓN DE SNAPSHOTS LOCALES (0% a 50%) ---
+                for (int i = 0; i < totalSegments; i++) {
+                    final int currentIdx = i + 1;
+                    final double progress = (double) currentIdx / totalSegments * 0.5; // Escala al 50%
+
+                    Platform.runLater(() -> {
+                        if (lblStatus != null) lblStatus.setText("Procesando segmento " + currentIdx + " de " + totalSegments);
+                        if (exportProgressBar != null) exportProgressBar.setProgress(progress);
+                    });
+
+                    VideoSegment seg = segments.get(i);
                     if (seg.isFreezeFrame()) {
-                        // ES UNA PAUSA CON DIBUJOS
-                        // Usamos un FutureTask para pedirle al hilo UI que genere la foto
+                        // Generamos la imagen con dibujos usando el hilo de UI
                         java.util.concurrent.FutureTask<String> task = new java.util.concurrent.FutureTask<>(() -> generateSnapshotForSegment(seg));
                         Platform.runLater(task);
-                        String base64 = task.get(); // Esperamos a que se genere
-
+                        String base64 = task.get();
                         items.add(ExportItem.image(base64, seg.getDuration()));
                     } else {
-                        // ES VIDEO NORMAL
                         items.add(ExportItem.video(seg.getSourceStartTime(), seg.getSourceEndTime()));
                     }
                 }
 
-                // 2. ENVIAR AL BACKEND
-                ExportRequest req = new ExportRequest(serverVideoId, items);
-                byte[] videoBytes = apiClient.exportVideo(req);
+                // --- FASE 2: PROCESAMIENTO EN SERVIDOR (50% a 90%) ---
+                Platform.runLater(() -> {
+                    if (lblStatus != null) lblStatus.setText("Enviando al servidor para montaje final...");
+                    if (exportProgressBar != null) exportProgressBar.setProgress(0.7);
+                });
 
-                // 3. GUARDAR EN DISCO
+                ExportRequest req = new ExportRequest(serverVideoId, items);
+                byte[] videoBytes = apiClient.exportVideo(req); // Llamada bloqueante a la API
+
+                // --- FASE 3: ESCRITURA EN DISCO (90% a 100%) ---
+                Platform.runLater(() -> {
+                    if (lblStatus != null) lblStatus.setText("Guardando archivo final...");
+                    if (exportProgressBar != null) exportProgressBar.setProgress(0.95);
+                });
+
                 Files.write(destFile.toPath(), videoBytes);
 
                 Platform.runLater(() -> {
-                    if (loadingSpinner != null) loadingSpinner.setVisible(false);
-                    // Mostrar mensaje de éxito
+                    resetExportUI();
+                    mostrarAlerta("Éxito", "Vídeo exportado correctamente en: " + destFile.getName());
                 });
 
             } catch (Exception e) {
                 e.printStackTrace();
-                // Manejar error
+                Platform.runLater(() -> {
+                    resetExportUI();
+                    mostrarAlerta("Error", "Fallo en la exportación: " + e.getMessage());
+                });
             }
         }).start();
+    }
+
+    private void resetExportUI() {
+        if (loadingSpinner != null) loadingSpinner.setVisible(false);
+        if (exportProgressBar != null) {
+            exportProgressBar.setVisible(false);
+            exportProgressBar.setProgress(0);
+        }
+        if (lblStatus != null) lblStatus.setText("");
     }
 
     private void exportCutsWithFFmpeg(File destFile) throws Exception {
@@ -2047,52 +2091,68 @@ public class EditorController {
     }
 
     private String generateSnapshotForSegment(VideoSegment seg) {
-        // Necesitamos ejecutar esto en el hilo de JavaFX para poder dibujar
         try {
-            // Creamos un Canvas temporal del tamaño estándar HD (o el de tu video)
-            int w = 1280;
-            int h = 720;
-            Canvas tempCanvas = new Canvas(w, h);
+            double exportW = 1280;
+            double exportH = 720;
+            Canvas tempCanvas = new Canvas(exportW, exportH);
             GraphicsContext gc = tempCanvas.getGraphicsContext2D();
 
-            // 1. Dibujar Fondo Negro
-            gc.setFill(Color.BLACK);
-            gc.fillRect(0, 0, w, h);
+            Image bg = seg.getThumbnail();
+            if (bg == null) return null;
 
-            // 2. Dibujar la miniatura del video (el frame congelado)
-            if (seg.getThumbnail() != null) {
-                gc.drawImage(seg.getThumbnail(), 0, 0, w, h);
-            }
+            // 1. Dibujamos el fondo ocupando todo el canvas de exportación (1280x720)
+            gc.drawImage(bg, 0, 0, exportW, exportH);
 
-            // 3. Dibujar los DIBUJOS (Flechas, etc.)
-            // Iteramos sobre tus formas
-            for (DrawingShape s : shapes) {
-                // Solo dibujamos si pertenecen a este clip
-                if (s.getClipId() != null && s.getClipId().equals(seg.getId())) {
-                    // Nota: Si tu Canvas de dibujo en pantalla no es 1280x720,
-                    // necesitas calcular un factor de escala aquí.
-                    // Por simplicidad, asumimos que dibujas sobre el canvas escalado:
-                    double scaleX = w / drawCanvas.getWidth();
-                    double scaleY = h / drawCanvas.getHeight();
+            // 2. RECUPERAR PARÁMETROS DE ESCALA DEL MOMENTO DEL DIBUJO
+            // Usamos los valores guardados en el request (originalWidth/Height)
+            double canvasW = drawCanvas.getWidth();
+            double canvasH = drawCanvas.getHeight();
 
-                    // Aquí deberías llamar a una versión de tu método de dibujo que acepte escala
-                    // Por ahora, asumimos que reutilizas la lógica de redrawVideoCanvas adaptada
-                    // O simplemente dibujas las formas escalando sus coordenadas manualmente.
+            // Calculamos cómo se veía el video en tu pantalla
+            double scale = Math.min(canvasW / bg.getWidth(), canvasH / bg.getHeight());
+            double vidDispW = bg.getWidth() * scale;
+            double vidDispH = bg.getHeight() * scale;
+            double offX = (canvasW - vidDispW) / 2.0;
+            double offY = (canvasH - vidDispH) / 2.0;
+
+            List<DrawingShape> cachedShapes = annotationsCache.get(seg.getId());
+
+            if (cachedShapes != null) {
+                for (DrawingShape s : cachedShapes) {
+                    // ✅ PASO CLAVE: Nueva lógica de escalado relativo al video, no al canvas
+                    drawShapeScaledToVideo(gc, s, offX, offY, vidDispW, vidDispH, exportW, exportH, bg);
                 }
             }
 
-            // 4. Convertir a Base64
-            javafx.scene.image.WritableImage snap = tempCanvas.snapshot(null, null);
+            // ... resto del código de conversión a Base64 ...
+            WritableImage snap = tempCanvas.snapshot(null, null);
             java.awt.image.BufferedImage bImage = SwingFXUtils.fromFXImage(snap, null);
             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-            ImageIO.write(bImage, "png", out);
-            byte[] data = out.toByteArray();
-            return java.util.Base64.getEncoder().encodeToString(data);
+            javax.imageio.ImageIO.write(bImage, "png", out);
+            return java.util.Base64.getEncoder().encodeToString(out.toByteArray());
+        } catch (Exception e) { return null; }
+    }
 
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
-        }
+    private void drawShapeScaledToVideo(GraphicsContext gc, DrawingShape s,
+                                        double offX, double offY,
+                                        double vidDispW, double vidDispH,
+                                        double exportW, double exportH, Image bg) {
+
+        // 1. Factores de escala (Relación entre lo que ves y el vídeo real)
+        double sx = exportW / vidDispW;
+        double sy = exportH / vidDispH;
+
+        // 2. Mapeo de coordenadas principales (Restamos margen y escalamos)
+        double x1 = (s.getStartX() - offX) * sx;
+        double y1 = (s.getStartY() - offY) * sy;
+        double x2 = (s.getEndX() - offX) * sx;
+        double y2 = (s.getEndY() - offY) * sy;
+
+        // 3. Escalado del grosor (Usamos sx para mantener la proporción)
+        double size = s.getStrokeWidth() * sx;
+
+        // 4. Llamamos al dibujante enviando los márgenes para ajustar puntos internos
+        drawShapeOnExternalGC(gc, s, bg, x1, y1, x2, y2, size, sx, sy, offX, offY);
     }
 
     @FXML
@@ -2102,29 +2162,25 @@ public class EditorController {
             return;
         }
 
-        double currentTime = videoService.getCurrentTime(); //
-        List<DrawingShape> currentShapes = new ArrayList<>(shapes); //
+        double currentTime = videoService.getCurrentTime();
+        List<DrawingShape> currentShapes = new ArrayList<>(shapes);
 
         if (currentShapes.isEmpty()) {
             mostrarAlerta("Aviso", "Dibuja algo antes de guardar.");
             return;
         }
 
-        // 1. BUSCAR EL SEGMENTO ACTUAL BAJO EL CABEZAL
-        VideoSegment activeSeg = getCurrentSegment(); //
-        final boolean alreadyHasSegment = (activeSeg != null && activeSeg.isFreezeFrame()); //
+        VideoSegment activeSeg = getCurrentSegment();
+        final boolean alreadyHasSegment = (activeSeg != null && activeSeg.isFreezeFrame());
 
-        // Si ya estamos en un segmento azul, usamos su ID. Si no, generamos uno nuevo.
-        final String segmentIdToUse = alreadyHasSegment ? activeSeg.getId() : UUID.randomUUID().toString(); //
+        final String segmentIdToUse = alreadyHasSegment ? activeSeg.getId() : UUID.randomUUID().toString();
 
         if (loadingSpinner != null) loadingSpinner.setVisible(true);
 
         new Thread(() -> {
             try {
-                // PASO A: Capturar imagen en servidor
-                String frameId = apiClient.captureFrame(serverVideoId, currentTime); //
+                String frameId = apiClient.captureFrame(serverVideoId, currentTime);
 
-                // PASO B: Petición de guardado
                 SaveFrameRequest saveReq = new SaveFrameRequest();
                 saveReq.setFrameId(frameId);
                 saveReq.setPausePointId(segmentIdToUse);
@@ -2133,12 +2189,12 @@ public class EditorController {
                 saveReq.setOriginalWidth((int) drawCanvas.getWidth());
                 saveReq.setOriginalHeight((int) drawCanvas.getHeight());
 
-                apiClient.saveAnnotation(saveReq); //
+                apiClient.saveAnnotation(saveReq);
 
                 Platform.runLater(() -> {
-                    // 2. LÓGICA DE INSERCIÓN EN EL TIMELINE
+                    Image rawVideoImage = videoView.getImage();
+
                     if (!alreadyHasSegment) {
-                        // Si no había segmento azul, creamos uno nuevo e insertamos
                         double duration = 3.0;
                         VideoSegment freezeSeg = new VideoSegment(
                                 currentTimelineTime,
@@ -2149,27 +2205,28 @@ public class EditorController {
                                 true
                         );
 
-                        // IMPORTANTE: Buscamos el índice del segmento de video actual para meter el azul justo después
+                        // Asignar la imagen pura al segmento
+                        freezeSeg.setThumbnail(rawVideoImage);
+
                         int index = segments.indexOf(activeSeg);
                         if (index != -1) {
-                            segments.add(index + 1, freezeSeg); // Lo insertamos en su sitio, no al final
+                            segments.add(index + 1, freezeSeg);
                         } else {
                             segments.add(freezeSeg);
                         }
-                        totalTimelineDuration += duration; //
+                        totalTimelineDuration += duration;
+                    } else {
+                        activeSeg.setThumbnail(rawVideoImage);
                     }
 
-                    // 3. ACTUALIZAR CACHÉ DE DIBUJOS
-                    // Esto es lo que permite que al volver atrás se vean las ediciones
-                    annotationsCache.put(segmentIdToUse, new ArrayList<>(currentShapes)); //
+                    annotationsCache.put(segmentIdToUse, new ArrayList<>(currentShapes));
 
-                    // 4. VINCULAR DIBUJOS AL ID DEL SEGMENTO
                     for(DrawingShape s : currentShapes) {
-                        s.setClipId(segmentIdToUse); //
+                        s.setClipId(segmentIdToUse);
                     }
 
-                    shapes.clear(); // Limpiamos el dibujo "en vivo"
-                    redrawVideoCanvas(); // Forzamos redibujado para que lea de la caché
+                    shapes.clear();
+                    redrawVideoCanvas();
                     updateScrollbarAndRedraw();
 
                     if (loadingSpinner != null) loadingSpinner.setVisible(false);
@@ -2182,6 +2239,222 @@ public class EditorController {
                 });
             }
         }).start();
+    }
+
+    private void drawShapeOnExternalGC(GraphicsContext gc, DrawingShape s, Image backgroundImage,
+                                       double x1, double y1, double x2, double y2,
+                                       double size, double sx, double sy, double offX, double offY) {
+
+        Color c = Color.web(s.getColor());
+        gc.setStroke(c);
+        gc.setFill(c);
+        gc.setLineWidth(size);
+        gc.setLineCap(StrokeLineCap.ROUND);
+
+        switch (s.getType()) {
+            case "arrow":
+                drawProArrowOnGC(gc, x1, y1, x2, y2, c, size, false);
+                break;
+            case "arrow-dashed":
+                drawProArrowOnGC(gc, x1, y1, x2, y2, c, size, true);
+                break;
+            case "arrow-3d":
+                double cx3d = (x1 + x2) / 2;
+                double cy3d = Math.min(y1, y2) - Math.abs(x2 - x1) * 0.3;
+                drawCurvedArrowOnGC(gc, x1, y1, cx3d, cy3d, x2, y2, c, size);
+                break;
+            case "pen":
+                gc.setLineWidth(size);
+                if (s.getPoints() != null && s.getPoints().size() > 2) {
+                    gc.beginPath();
+                    // Ajustamos cada punto: (Coordenada - Margen) * Escala
+                    gc.moveTo((s.getPoints().get(0) - offX) * sx, (s.getPoints().get(1) - offY) * sy);
+                    for (int i = 2; i < s.getPoints().size(); i += 2) {
+                        gc.lineTo((s.getPoints().get(i) - offX) * sx, (s.getPoints().get(i + 1) - offY) * sy);
+                    }
+                    gc.stroke();
+                }
+                break;
+            case "wall":
+                gc.setLineWidth(2.0 * sx);
+                drawSimpleWallOnGC(gc, x1, y1, x2, y2, c, 80.0 * sy);
+                break;
+            case "base":
+                gc.setLineWidth(2.0 * sx);
+                drawProBaseOnGC(gc, x1, y1, x2, y2, c, size);
+                break;
+            case "spotlight":
+                gc.setLineWidth(2.0 * sx);
+                drawProSpotlightOnGC(gc, x1, y1, x2, y2, c, size);
+                break;
+            case "polygon":
+                if (s.getPoints() != null && s.getPoints().size() >= 4) {
+                    gc.setLineWidth(2.0 * sx);
+                    List<Double> scaledPts = new ArrayList<>();
+                    for (int i = 0; i < s.getPoints().size(); i += 2) {
+                        scaledPts.add((s.getPoints().get(i) - offX) * sx);
+                        scaledPts.add((s.getPoints().get(i + 1) - offY) * sy);
+                    }
+                    drawFilledPolygonOnGC(gc, scaledPts, c);
+                }
+                break;
+            case "rect-shaded":
+                gc.setLineWidth(2.0 * sx);
+                drawShadedRectOnGC(gc, x1, y1, x2, y2, c);
+                break;
+            case "rectangle":
+                gc.setLineWidth(size);
+                gc.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+                break;
+            case "text":
+                if (s.getTextValue() != null) {
+                    double fontSize = size * 2.5;
+                    gc.setFont(Font.font("Arial", FontWeight.BOLD, fontSize));
+                    gc.setStroke(Color.BLACK);
+                    gc.setLineWidth(1.5 * sx);
+                    gc.strokeText(s.getTextValue(), x1, y1);
+                    gc.setFill(c);
+                    gc.fillText(s.getTextValue(), x1, y1);
+                }
+                break;
+            case "curve":
+                if (s.getPoints() != null && !s.getPoints().isEmpty()) {
+                    double ctrlX = (s.getPoints().get(0) - offX) * sx;
+                    double ctrlY = (s.getPoints().get(1) - offY) * sy;
+                    double angle = Math.atan2(y2 - ctrlY, x2 - ctrlX);
+                    double arrowLen = size * 1.5;
+                    gc.beginPath();
+                    gc.moveTo(x1, y1);
+                    gc.quadraticCurveTo(ctrlX, ctrlY, x2 - arrowLen * Math.cos(angle), y2 - arrowLen * Math.sin(angle));
+                    gc.stroke();
+                    drawArrowHeadOnGC(gc, x2, y2, angle, size, c);
+                }
+                break;
+            case "zoom-circle":
+                drawRealZoomOnGC(gc, x1, y1, x2, y2, c, backgroundImage, sx, sy, true);
+                break;
+            case "zoom-rect":
+                drawRealZoomOnGC(gc, x1, y1, x2, y2, c, backgroundImage, sx, sy, false);
+                break;
+        }
+    }
+
+    private void drawProArrowOnGC(GraphicsContext gc, double x1, double y1, double x2, double y2, Color color, double size, boolean dashed) {
+        // ✅ LA CLAVE: El grosor de la línea debe ser reducido
+        gc.setLineWidth(size / 3.0);
+
+        if (dashed) gc.setLineDashes(10 * size/20.0, 10 * size/20.0);
+        else gc.setLineDashes(null);
+
+        double angle = Math.atan2(y2 - y1, x2 - x1);
+        double headLen = size * 1.5;
+
+        // Dibujar el cuerpo de la flecha
+        gc.strokeLine(x1, y1, x2 - (headLen * 0.8 * Math.cos(angle)), y2 - (headLen * 0.8 * Math.sin(angle)));
+
+        gc.setLineDashes(null);
+        drawArrowHeadOnGC(gc, x2, y2, angle, size, color);
+    }
+
+    private void drawArrowHeadOnGC(GraphicsContext gc, double x, double y, double angle, double size, Color color) {
+        double headLen = size * 1.5; double headWidth = size;
+        double xBase = x - headLen * Math.cos(angle); double yBase = y - headLen * Math.sin(angle);
+        double x3 = xBase + headWidth * Math.cos(angle - Math.PI/2); double y3 = yBase + headWidth * Math.sin(angle - Math.PI/2);
+        double x4 = xBase + headWidth * Math.cos(angle + Math.PI/2); double y4 = yBase + headWidth * Math.sin(angle + Math.PI/2);
+        gc.setFill(color);
+        gc.fillPolygon(new double[]{x, x3, x4}, new double[]{y, y3, y4}, 3);
+    }
+
+    private void drawCurvedArrowOnGC(GraphicsContext gc, double x1, double y1, double cx, double cy, double x2, double y2, Color color, double size) {
+        gc.beginPath(); gc.moveTo(x1, y1); gc.quadraticCurveTo(cx, cy, x2, y2); gc.stroke();
+        double angle = Math.atan2(y2 - cy, x2 - cx);
+        drawArrowHeadOnGC(gc, x2, y2, angle, size, color);
+    }
+
+    private void drawSimpleWallOnGC(GraphicsContext gc, double x1, double y1, double x2, double y2, Color c, double wallHeight) {
+        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.3));
+        gc.fillPolygon(new double[]{x1, x2, x2, x1}, new double[]{y1, y2, y2 - wallHeight, y1 - wallHeight}, 4);
+        gc.setStroke(c);
+        gc.strokeLine(x1, y1, x2, y2);
+        gc.strokeLine(x1, y1 - wallHeight, x2, y2 - wallHeight);
+        gc.strokeLine(x1, y1, x1, y1 - wallHeight);
+        gc.strokeLine(x2, y2, x2, y2 - wallHeight);
+    }
+
+    private void drawFilledPolygonOnGC(GraphicsContext gc, List<Double> pts, Color c) {
+        int n = pts.size() / 2;
+        double[] xs = new double[n]; double[] ys = new double[n];
+        for (int i = 0; i < n; i++) { xs[i] = pts.get(i*2); ys[i] = pts.get(i*2+1); }
+        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.4));
+        gc.fillPolygon(xs, ys, n);
+        gc.strokePolygon(xs, ys, n);
+    }
+
+    private void drawShadedRectOnGC(GraphicsContext gc, double x1, double y1, double x2, double y2, Color c) {
+        double l = Math.min(x1, x2); double t = Math.min(y1, y2);
+        double w = Math.abs(x2-x1); double h = Math.abs(y2-y1);
+        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.3));
+        gc.fillRect(l, t, w, h);
+        gc.strokeRect(l, t, w, h);
+    }
+
+    private void drawProSpotlightOnGC(GraphicsContext gc, double x1, double y1, double x2, double y2, Color c, double size) {
+        double rxTop = size * 1.5; double ryTop = rxTop * 0.3;
+        double rxBot = size * 3.0 + Math.abs(x2-x1)*0.2; double ryBot = rxBot * 0.3;
+        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.2));
+        gc.fillPolygon(new double[]{x1-rxTop, x2-rxBot, x2+rxBot, x1+rxTop}, new double[]{y1, y2, y2, y1}, 4);
+        gc.strokeOval(x1-rxTop, y1-ryTop, rxTop*2, ryTop*2);
+        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.4));
+        gc.fillOval(x2-rxBot, y2-ryBot, rxBot*2, ryBot*2);
+    }
+
+    private void drawProBaseOnGC(GraphicsContext gc, double x1, double y1, double x2, double y2, Color c, double size) {
+        double radius = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.3));
+        gc.fillOval(x1 - radius, y1 - radius * 0.4, radius * 2, radius * 0.8);
+        gc.strokeOval(x1 - radius, y1 - radius * 0.4, radius * 2, radius * 0.8);
+    }
+
+    private void drawRealZoomOnGC(GraphicsContext gc, double x1, double y1, double x2, double y2,
+                                  Color c, Image img, double sx, double sy, boolean circle) {
+        double w = Math.abs(x2 - x1);
+        double h = Math.abs(y2 - y1);
+        double left = Math.min(x1, x2);
+        double top = Math.min(y1, y2);
+
+        if (img == null) return;
+
+        // Dimensiones de exportación (deben ser las mismas que en generateSnapshotForSegment)
+        double exportW = 1280;
+        double exportH = 720;
+
+        gc.save();
+        gc.beginPath();
+        if (circle) gc.arc(left + w/2, top + h/2, w/2, h/2, 0, 360);
+        else gc.rect(left, top, w, h);
+        gc.closePath();
+        gc.clip();
+
+        double zoomFactor = 2.0;
+        double centerX = left + w/2;
+        double centerY = top + h/2;
+
+        Affine transform = new Affine();
+        transform.appendTranslation(centerX, centerY);
+        transform.appendScale(zoomFactor, zoomFactor);
+        transform.appendTranslation(-centerX, -centerY);
+        gc.setTransform(transform);
+
+        // ✅ CORRECCIÓN: Dibujar la imagen de fondo ajustada EXACTAMENTE al tamaño de exportación
+        // Esto asegura que el centro del zoom coincida con el punto de la pantalla
+        gc.drawImage(img, 0, 0, exportW, exportH);
+
+        gc.restore();
+
+        gc.setStroke(c);
+        gc.setLineWidth(2.0 * sx); // Borde proporcional
+        if (circle) gc.strokeOval(left, top, w, h);
+        else gc.strokeRect(left, top, w, h);
     }
 
 }
