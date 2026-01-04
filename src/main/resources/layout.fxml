@@ -54,8 +54,6 @@
                     <ToggleButton fx:id="btnSpotlight" onAction="#setToolSpotlight" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
                     <ToggleButton fx:id="btnBase" onAction="#setToolBase" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
                     <ToggleButton fx:id="btnWall" onAction="#setToolWall" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
-
-                    <ToggleButton fx:id="btnRectangle" onAction="#setToolRectangle" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
                     <ToggleButton fx:id="btnRectShaded" onAction="#setToolRectShaded" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
                     <ToggleButton fx:id="btnPolygon" onAction="#setToolPolygon" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
                     <ToggleButton fx:id="btnCurve" onAction="#setToolCurve" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />

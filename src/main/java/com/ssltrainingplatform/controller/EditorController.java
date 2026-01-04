@@ -150,6 +150,8 @@ public class EditorController {
     private int dropIndex = -1;
     private double dropIndicatorX = -1;
 
+    private ContextMenu timelineContextMenu;
+
     // =========================================================================
     //                               INICIALIZACIÓN
     // =========================================================================
@@ -164,6 +166,8 @@ public class EditorController {
         applyIcons();
 
         setupTooltips();
+
+        initTimelineContextMenu();
 
         container.setMinWidth(0); container.setMinHeight(0);
         videoView.setPreserveRatio(true);
@@ -287,7 +291,27 @@ public class EditorController {
     private void onTimelinePressed(MouseEvent e) {
         double scrollOffset = timelineScroll.getValue();
         double clickTime = (e.getX() + scrollOffset) / pixelsPerSecond;
-        double topMargin = 22; // La misma que usas en redrawTimeline
+        double topMargin = 22;
+
+        // Cerrar el menú si ya estaba abierto
+        if (timelineContextMenu != null) timelineContextMenu.hide();
+
+        // --- DETECTAR CLIC DERECHO ---
+        if (e.getButton() == MouseButton.SECONDARY) {
+            // 1. Seleccionamos el segmento bajo el ratón para que la acción sepa sobre qué actuar
+            selectedSegment = null;
+            for (VideoSegment seg : segments) {
+                if (clickTime >= seg.getStartTime() && clickTime <= seg.getEndTime()) {
+                    selectedSegment = seg;
+                    break;
+                }
+            }
+
+            // 2. Mostramos el menú en la posición del ratón
+            timelineContextMenu.show(timelineCanvas, e.getScreenX(), e.getScreenY());
+            redrawTimeline();
+            return; // Detenemos aquí para no mover el playhead con el clic derecho
+        }
 
         // Resetear estados
         segmentBeingDragged = null;
@@ -308,6 +332,8 @@ public class EditorController {
                 return;
             }
         }
+
+        seekTimeline(e.getX());
     }
 
     private void onTimelineReleased(MouseEvent e) {
@@ -335,21 +361,6 @@ public class EditorController {
         }
     }
 
-    // Método auxiliar para seleccionar sin mover el cabezal
-    private void handleSegmentSelection(double x) {
-        double scrollOffset = timelineScroll.getValue();
-        double t = (x + scrollOffset) / pixelsPerSecond;
-
-        selectedSegment = null;
-        for (VideoSegment s : segments) {
-            if (t >= s.getStartTime() && t < s.getEndTime()) {
-                selectedSegment = s;
-                break;
-            }
-        }
-        redrawTimeline();
-    }
-
     private void applyIcons() {
         if(btnCursor != null) btnCursor.setGraphic(AppIcons.getIcon("cursor", 16));
         if(btnPen != null) btnPen.setGraphic(AppIcons.getIcon("pen", 16));
@@ -369,7 +380,6 @@ public class EditorController {
         if(btnSkipStart != null) btnSkipStart.setGraphic(AppIcons.getIcon("skipBack", 16));
         if(btnSkipEnd != null) btnSkipEnd.setGraphic(AppIcons.getIcon("skipForward", 16));
         if(btnCurve != null) btnCurve.setGraphic(AppIcons.getIcon("curve", 16));
-        if(btnRectangle != null) btnRectangle.setGraphic(AppIcons.getIcon("rectangle", 16));
     }
 
     // --- SELECTORES HERRAMIENTAS ---
@@ -386,7 +396,6 @@ public class EditorController {
     @FXML public void setToolRectShaded() { changeTool(ToolType.RECT_SHADED); }
     @FXML public void setToolZoomCircle() { changeTool(ToolType.ZOOM_CIRCLE); }
     @FXML public void setToolZoomRect() { changeTool(ToolType.ZOOM_RECT); }
-    @FXML public void setToolRectangle() { changeTool(ToolType.RECTANGLE); }
     @FXML public void setToolCurve() { changeTool(ToolType.CURVE); }
 
     private void changeTool(ToolType type) {
@@ -591,7 +600,6 @@ public class EditorController {
                 case RECT_SHADED -> "rect-shaded";
                 case ZOOM_CIRCLE -> "zoom-circle";
                 case ZOOM_RECT -> "zoom-rect";
-                case RECTANGLE -> "rectangle";
                 default -> "arrow";
             };
 
@@ -916,11 +924,6 @@ public class EditorController {
                         gcDraw.fillText(s.getTextValue(), x1, y1);
                     }
                     break;
-                case "rectangle":
-                    gcDraw.setStroke(c); gcDraw.setLineWidth(size);
-                    double rLeft = Math.min(x1, x2); double rTop = Math.min(y1, y2);
-                    gcDraw.strokeRect(rLeft, rTop, Math.abs(x2-x1), Math.abs(y2-y1));
-                    break;
                 case "curve":
                     if (s.getPoints() != null && !s.getPoints().isEmpty()) {
                         double c_x = s.getPoints().get(0);
@@ -1058,28 +1061,6 @@ public class EditorController {
         gcDraw.setStroke(c); gcDraw.setLineWidth(2); gcDraw.setLineDashes(null); gcDraw.strokeOval(x1 - rxTop, y1 - ryTop, rxTop * 2, ryTop * 2);
         gcDraw.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.4)); gcDraw.fillOval(x2 - rxBot, y2 - ryBot, rxBot * 2, ryBot * 2);
         gcDraw.setStroke(c.deriveColor(0, 1, 1, 0.5)); gcDraw.strokeOval(x2 - rxBot, y2 - ryBot, rxBot * 2, ryBot * 2);
-    }
-
-    private void drawPolyWall(List<Double> pts, Color c) {
-        double wallHeight = 100.0; // Muro alto
-        gcDraw.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.2));
-        gcDraw.setStroke(c); gcDraw.setLineWidth(2);
-        for (int i = 0; i < pts.size() - 2; i += 2) {
-            double sx = pts.get(i);     double sy = pts.get(i+1);
-            double ex = pts.get(i+2);   double ey = pts.get(i+3);
-            double sxTop = sx; double syTop = sy - wallHeight;
-            double exTop = ex; double eyTop = ey - wallHeight;
-            // Cara
-            gcDraw.fillPolygon(new double[]{sx, ex, exTop, sxTop}, new double[]{sy, ey, eyTop, syTop}, 4);
-            // Bordes (sin cerrar arriba para efecto valla)
-            gcDraw.strokeLine(sx, sy, ex, ey);
-            gcDraw.strokeLine(sx, sy, sxTop, syTop);
-            if (i == pts.size() - 4) gcDraw.strokeLine(ex, ey, exTop, eyTop);
-
-            gcDraw.setLineWidth(0.5);
-            gcDraw.strokeLine(sx, sy - wallHeight/2, ex, ey - wallHeight/2);
-            gcDraw.setLineWidth(2);
-        }
     }
 
     private void drawProArrow(double x1, double y1, double x2, double y2, Color color, double size, boolean dashed) {
@@ -1427,22 +1408,6 @@ public class EditorController {
         }
     }
     private void selectSegmentUnderPlayhead() { for (VideoSegment seg : segments) { if (currentTimelineTime >= seg.getStartTime() && currentTimelineTime < seg.getEndTime()) { selectedSegment = seg; break; } } }
-    private boolean calculateTimelineTimeFromReal() {
-        if (isPlayingFreeze) return true; // Si es congelado, consideramos que estamos "bien"
-
-        for (VideoSegment seg : segments) {
-            // Verificamos si el tiempo REAL del video cae dentro del rango original de este segmento
-            if (!seg.isFreezeFrame() &&
-                    currentRealVideoTime >= seg.getSourceStartTime() - 0.1 && // Margen de tolerancia
-                    currentRealVideoTime <= seg.getSourceEndTime() + 0.1) {
-
-                double offset = currentRealVideoTime - seg.getSourceStartTime();
-                currentTimelineTime = seg.getStartTime() + offset;
-                return true; // ¡Encontrado! Estamos en zona segura
-            }
-        }
-        return false; // ¡Peligro! Estamos en una zona recortada
-    }
 
     private void redrawTimeline() {
         double w = timelineCanvas.getWidth();
@@ -1660,7 +1625,6 @@ public class EditorController {
     private void updateScrollbarAndRedraw() { if (totalTimelineDuration <= 0) return; double canvasW = timelineCanvas.getWidth(); double totalW = totalTimelineDuration * pixelsPerSecond; timelineScroll.setMax(Math.max(0, totalW - canvasW)); timelineScroll.setVisibleAmount((canvasW / totalW) * timelineScroll.getMax()); redrawTimeline(); }
     private void updateTimeLabel() { int m = (int) currentTimelineTime / 60; int s = (int) currentTimelineTime % 60; lblTime.setText(String.format("%02d:%02d", m, s) + " / " + String.format("%02d:%02d", (int)totalTimelineDuration/60, (int)totalTimelineDuration%60)); }
     private String formatShortTime(int totalSeconds) { int m = totalSeconds / 60; int s = totalSeconds % 60; return (m > 0) ? String.format("%d:%02d", m, s) : s + "s"; }
-    private void handleTimelineInteraction(double x) { seekTimeline(x); selectedSegment=null; double t = (x+timelineScroll.getValue())/pixelsPerSecond; for(VideoSegment s:segments) if(t>=s.getStartTime() && t<s.getEndTime()){selectedSegment=s; break;} redrawTimeline(); }
 
     public void onImportVideo() {
         FileChooser fc = new FileChooser();
@@ -1969,85 +1933,6 @@ public class EditorController {
         if (lblStatus != null) lblStatus.setText("");
     }
 
-    private void exportCutsWithFFmpeg(File destFile) throws Exception {
-        // NOTA: Asumimos que el usuario tiene 'ffmpeg' instalado y en el PATH del sistema.
-        // Si no, habría que poner la ruta completa ej: "C:/ffmpeg/bin/ffmpeg.exe"
-        String ffmpegPath = "ffmpeg";
-
-        // Obtenemos la ruta del video original (asumiendo que todos los segmentos vienen del mismo)
-        // Si tienes múltiples videos, la lógica sería más compleja.
-        String sourcePath = videoService.getSourcePath();
-        if (sourcePath == null) throw new Exception("No se encuentra el video origen.");
-
-        // Construir el 'filter_complex' para concatenar cortes
-        StringBuilder filter = new StringBuilder();
-        int segCount = 0;
-
-        for (int i = 0; i < segments.size(); i++) {
-            VideoSegment seg = segments.get(i);
-
-            // Ignoramos frames congelados en esta exportación básica
-            // (Exportar freeze-frames requiere filtros 'loop' o 'tpad' complejos)
-            if (seg.isFreezeFrame()) continue;
-
-            // Cálculo de tiempos
-            double start = seg.getSourceStartTime();
-            double end = seg.getSourceEndTime();
-            double duration = end - start;
-
-            // Evitar segmentos nulos
-            if (duration <= 0.01) continue;
-
-            // [0:v]trim=start=10:duration=5,setpts=PTS-STARTPTS[v0];
-            filter.append(String.format("[0:v]trim=start=%.3f:duration=%.3f,setpts=PTS-STARTPTS[v%d];",
-                    start, duration, segCount));
-
-            // Si tuvieras audio, habría que añadir: [0:a]atrim=start=...[a0];
-
-            segCount++;
-        }
-
-        if (segCount == 0) throw new Exception("No hay segmentos válidos para exportar.");
-
-        // Concatenación: [v0][v1]...concat=n=X:v=1[outv]
-        for (int i = 0; i < segCount; i++) {
-            filter.append("[v").append(i).append("]");
-        }
-        filter.append("concat=n=").append(segCount).append(":v=1:a=0[outv]");
-
-        // Construir comando final
-        // ffmpeg -i input.mp4 -filter_complex "..." -map "[outv]" output.mp4
-        List<String> cmd = new ArrayList<>();
-        cmd.add(ffmpegPath);
-        cmd.add("-y"); // Sobrescribir
-        cmd.add("-i");
-        cmd.add(sourcePath);
-        cmd.add("-filter_complex");
-        cmd.add(filter.toString());
-        cmd.add("-map");
-        cmd.add("[outv]");
-        cmd.add("-c:v");
-        cmd.add("libx264"); // Codec estándar
-        cmd.add("-preset");
-        cmd.add("fast");
-        cmd.add(destFile.getAbsolutePath());
-
-        ProcessBuilder pb = new ProcessBuilder(cmd);
-        pb.redirectErrorStream(true); // Ver logs de ffmpeg en consola Java
-        Process p = pb.start();
-
-        // Leer salida para debug
-        try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream()))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                System.out.println("[FFmpeg] " + line);
-            }
-        }
-
-        int exitCode = p.waitFor();
-        if (exitCode != 0) throw new Exception("FFmpeg terminó con error " + exitCode);
-    }
-
     private void mostrarAlerta(String titulo, String mensaje) {
         Alert alert = new Alert(Alert.AlertType.INFORMATION);
         alert.setTitle(titulo);
@@ -2315,10 +2200,6 @@ public class EditorController {
                 gc.setLineWidth(2.0 * sx);
                 drawShadedRectOnGC(gc, x1, y1, x2, y2, c);
                 break;
-            case "rectangle":
-                gc.setLineWidth(size);
-                gc.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
-                break;
             case "text":
                 if (s.getTextValue() != null) {
                     double fontSize = size * 2.5;
@@ -2531,6 +2412,22 @@ public class EditorController {
             // --- LÓGICA DE SCRUBBING: Si no arrastramos clip o estamos en la regla ---
             seekTimeline(e.getX());
         }
+    }
+
+    private void initTimelineContextMenu() {
+        timelineContextMenu = new ContextMenu();
+
+        MenuItem captureItem = new MenuItem("📷 Capturar Frame");
+        captureItem.setOnAction(e -> onCaptureFrame());
+
+        MenuItem cutItem = new MenuItem("✂ Cortar Video");
+        cutItem.setOnAction(e -> onCutVideo());
+
+        MenuItem deleteItem = new MenuItem("🗑 Borrar Segmento");
+        deleteItem.setStyle("-fx-text-fill: #ff4444;"); // Estilo visual para borrar
+        deleteItem.setOnAction(e -> onDeleteSegment());
+
+        timelineContextMenu.getItems().addAll(captureItem, cutItem, new SeparatorMenuItem(), deleteItem);
     }
 
 }
