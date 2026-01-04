@@ -2471,14 +2471,32 @@ public class EditorController {
     }
 
     private void onTimelineDragged(MouseEvent e) {
+        // 1. Declaramos las constantes y variables de margen
         double topMargin = 22;
+        double canvasW = timelineCanvas.getWidth();
+        double edgeThreshold = 70.0; // Distancia al borde para activar el scroll
+
+        // ✅ DEFINIMOS scrollOffset AQUÍ (Esto corrige tu error)
+        double scrollOffset = timelineScroll.getValue();
 
         if (segmentBeingDragged != null && e.getY() >= topMargin) {
-            // --- LÓGICA iMOVIE: Mover clips ---
             isDraggingTimeline = true;
+
+            // 2. LÓGICA DE AUTO-SCROLL
+            // Si el ratón está cerca del borde derecho, aumentamos el scroll
+            if (e.getX() > canvasW - edgeThreshold) {
+                timelineScroll.setValue(scrollOffset + 15);
+            }
+            // Si está cerca del borde izquierdo, lo reducimos
+            else if (e.getX() < edgeThreshold && scrollOffset > 0) {
+                timelineScroll.setValue(scrollOffset - 15);
+            }
+
+            // 3. ACTUALIZAR POSICIÓN DEL FANTASMA
             currentDragX = e.getX();
-            double scrollOffset = timelineScroll.getValue();
-            double mousePosTime = (e.getX() + scrollOffset) / pixelsPerSecond;
+
+            // 4. LÓGICA DE INSERCIÓN iMOVIE (Usando scrollOffset de forma segura)
+            double mousePosTime = (e.getX() + timelineScroll.getValue()) / pixelsPerSecond;
 
             List<VideoSegment> others = new ArrayList<>(segments);
             others.remove(segmentBeingDragged);
@@ -2490,6 +2508,7 @@ public class EditorController {
                 for (int i = 0; i < others.size(); i++) {
                     VideoSegment s = others.get(i);
                     double midPoint = s.getStartTime() + (s.getDuration() / 2.0);
+
                     if (mousePosTime < midPoint) {
                         newDropIndex = i;
                         indicatorTime = s.getStartTime();
@@ -2500,12 +2519,16 @@ public class EditorController {
                     }
                 }
             }
+
+            // 5. ACTUALIZAR VARIABLES PARA EL DIBUJO
             this.dropIndex = newDropIndex;
-            this.dropIndicatorX = (indicatorTime * pixelsPerSecond) - scrollOffset;
+            // Usamos el valor de scroll actualizado para que la línea amarilla no "tiemble"
+            this.dropIndicatorX = (indicatorTime * pixelsPerSecond) - timelineScroll.getValue();
+
             redrawTimeline();
+
         } else {
-            // --- LÓGICA DE SCRUBBING: Mover el cabezal ---
-            // Si no estamos arrastrando un clip, o si el ratón sube a la regla
+            // --- LÓGICA DE SCRUBBING: Si no arrastramos clip o estamos en la regla ---
             seekTimeline(e.getX());
         }
     }
