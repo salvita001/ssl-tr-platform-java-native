@@ -144,8 +144,11 @@ public class EditorController {
     private long ignoreUpdatesUntil = 0;
     private Map<String, List<DrawingShape>> annotationsCache = new HashMap<>();
 
-    @FXML private ProgressBar exportProgressBar; // Nueva barra en tu FXML
-    @FXML private Label lblStatus; // Label para mensajes como "Generando frame 1/5..."
+    @FXML private ProgressBar exportProgressBar;
+    @FXML private Label lblStatus;
+
+    private int dropIndex = -1;
+    private double dropIndicatorX = -1;
 
     // =========================================================================
     //                               INICIALIZACIÓN
@@ -272,85 +275,63 @@ public class EditorController {
 
         if (exportProgressBar != null) exportProgressBar.setVisible(false);
         if (lblStatus != null) lblStatus.setText("");
+
+        // ✅ ESTO ES LO QUE FALTA: Conectar el arrastre del ratón
+        timelineCanvas.setOnMouseDragged(this::onTimelineDragged);
+
+        // También asegúrate de que el scroll se actualice al arrastrar
+        timelineCanvas.setOnMousePressed(this::onTimelinePressed);
+        timelineCanvas.setOnMouseReleased(this::onTimelineReleased);
     }
 
-    @FXML
-    public void onTimelineClick(MouseEvent e) {
-        double y = e.getY();
-        double topMargin = 22; // La altura de la regla que definimos en redrawTimeline
+    private void onTimelinePressed(MouseEvent e) {
+        double scrollOffset = timelineScroll.getValue();
+        double clickTime = (e.getX() + scrollOffset) / pixelsPerSecond;
+        double topMargin = 22; // La misma que usas en redrawTimeline
 
-        // A. CLIC EN LA REGLA (ARRIBA) -> SEEK (Mover cabezal)
-        if (y < topMargin) {
-            isDraggingTimeline = false;
-            segmentBeingDragged = null;
+        // Resetear estados
+        segmentBeingDragged = null;
+        isDraggingTimeline = false;
+
+        // ✅ REGLA DE ORO: Si pulsas arriba, SIEMPRE es para mover el cabezal (Seek)
+        if (e.getY() < topMargin) {
             seekTimeline(e.getX());
+            return;
         }
-        // B. CLIC EN LAS PISTAS (ABAJO) -> SELECCIONAR PARA ARRASTRAR
-        else {
-            handleSegmentSelection(e.getX());
-            if (selectedSegment != null) {
-                isDraggingTimeline = true;
-                segmentBeingDragged = selectedSegment;
+
+        // Si pulsas abajo, buscamos si hay un segmento para arrastrar
+        for (VideoSegment seg : segments) {
+            if (clickTime >= seg.getStartTime() && clickTime <= seg.getEndTime()) {
+                segmentBeingDragged = seg;
+                currentDragX = e.getX();
+                redrawTimeline();
+                return;
             }
         }
     }
 
-    @FXML
-    public void onTimelineDrag(MouseEvent e) {
-        if (!isDraggingTimeline) {
-            seekTimeline(e.getX());
-        } else {
-            // Guardamos la posición visual para el "fantasma"
-            currentDragX = e.getX();
-
-            // Redibujamos para que se vea moverse
-            redrawTimeline();
-        }
-    }
-
-    // NUEVO MÉTODO: SOLTAR Y REORDENAR
     private void onTimelineReleased(MouseEvent e) {
-        saveState();
         if (isDraggingTimeline && segmentBeingDragged != null) {
+            // 1. Extraer el segmento
+            segments.remove(segmentBeingDragged);
 
-            // 1. Calcular dónde lo hemos soltado
-            double scrollOffset = timelineScroll.getValue();
-            double dropTime = (e.getX() + scrollOffset) / pixelsPerSecond;
-
-            // 2. Buscar en qué índice cae ese tiempo
-            int newIndex = segments.size(); // Por defecto al final
-            for (int i = 0; i < segments.size(); i++) {
-                VideoSegment s = segments.get(i);
-                // Si soltamos antes de la mitad de un segmento, insertamos ahí
-                if (dropTime < (s.getStartTime() + s.getEndTime()) / 2) {
-                    newIndex = i;
-                    break;
-                }
+            // 2. Insertar en el hueco detectado por la línea amarilla
+            if (dropIndex >= 0 && dropIndex <= segments.size()) {
+                segments.add(dropIndex, segmentBeingDragged);
+            } else {
+                segments.add(segmentBeingDragged);
             }
 
-            // 3. Mover el segmento en la lista
-            int oldIndex = segments.indexOf(segmentBeingDragged);
+            // 3. Recalcular tiempos (esto ahora fijará el clip en su nueva posición)
+            recalculateSegmentTimes();
 
-            if (oldIndex != -1 && oldIndex != newIndex) {
-                segments.remove(oldIndex);
-
-                // Ajustar índice si el borrado afectó a la posición de inserción
-                if (newIndex > oldIndex) newIndex--;
-
-                // Insertar en nueva posición
-                if (newIndex >= segments.size()) {
-                    segments.add(segmentBeingDragged);
-                } else {
-                    segments.add(newIndex, segmentBeingDragged);
-                }
-
-                // 4. RECALCULAR TIEMPOS Y REDIBUJAR
-                recalculateSegmentTimes();
-                System.out.println("Segmento movido a la posición " + newIndex);
-            }
-
+            // 4. Limpiar variables
             isDraggingTimeline = false;
             segmentBeingDragged = null;
+            dropIndex = -1;
+            dropIndicatorX = -1;
+
+            redrawTimeline();
         }
     }
 
@@ -751,17 +732,32 @@ public class EditorController {
     // =========================================================================
 
     private void redrawVideoCanvas() {
+
         gcDraw.clearRect(0, 0, drawCanvas.getWidth(), drawCanvas.getHeight());
 
-        double canvasW = drawCanvas.getWidth(); double canvasH = drawCanvas.getHeight();
-        javafx.scene.image.Image vidImg = videoView.getImage();
-        double scale = 1.0; double vidDispW = 0, vidDispH = 0; double offX = 0, offY = 0;
+        // 1. Identificar el segmento bajo el playhead
+        VideoSegment activeSeg = getCurrentSegment();
 
-        if (vidImg != null) {
-            scale = Math.min(canvasW / vidImg.getWidth(), canvasH / vidImg.getHeight());
-            vidDispW = vidImg.getWidth() * scale; vidDispH = vidImg.getHeight() * scale;
-            offX = (canvasW - vidDispW) / 2.0; offY = (canvasH - vidDispH) / 2.0;
-        }
+        // 2. ✅ PRIORIDAD: Si es azul (freeze), usamos su foto. Si no, el video real.
+        // Esto hace que el frame "se mueva" con sus dibujos a cualquier posición.
+        Image vidImg = (activeSeg != null && activeSeg.isFreezeFrame() && activeSeg.getThumbnail() != null)
+                ? activeSeg.getThumbnail()
+                : videoView.getImage();
+
+        if (vidImg == null) return;
+
+        // 3. Cálculos de escala usando 'vidImg' (ya sea la foto o el video)
+        double canvasW = drawCanvas.getWidth();
+        double canvasH = drawCanvas.getHeight();
+        double scale = Math.min(canvasW / vidImg.getWidth(), canvasH / vidImg.getHeight());
+        double vidDispW = vidImg.getWidth() * scale;
+        double vidDispH = vidImg.getHeight() * scale;
+        double offX = (canvasW - vidDispW) / 2.0;
+        double offY = (canvasH - vidDispH) / 2.0;
+
+        // Dibujar el fondo (foto o video)
+        gcDraw.drawImage(vidImg, offX, offY, vidDispW, vidDispH);
+
         final double AI_INPUT_SIZE = 640.0;
 
         // IA
@@ -780,7 +776,6 @@ public class EditorController {
             }
         }
 
-        VideoSegment activeSeg = getCurrentSegment();
         String activeSegId = (activeSeg != null) ? activeSeg.getId() : null;
 
         // Combinar dibujos en vivo con los de la caché
@@ -1467,31 +1462,39 @@ public class EditorController {
         for (int i = 0; i < segments.size(); i++) {
             VideoSegment seg = segments.get(i);
 
-            // TRUCO: Si estamos arrastrando este segmento, NO lo dibujamos en su sitio original.
-            // Esto crea el efecto de que lo hemos "levantado" de la pista.
             if (isDraggingTimeline && seg == segmentBeingDragged) continue;
 
             double startX = (seg.getStartTime() * pixelsPerSecond) - scrollOffset;
             double width = seg.getDuration() * pixelsPerSecond;
 
-            // Solo dibujar si es visible en pantalla
             if (startX + width > 0 && startX < w) {
-                // Opacidad 1.0 (totalmente visible)
                 drawStyledClip(gcTimeline, seg, startX, topMargin, width, barHeight, 1.0);
             }
         }
 
-        // 3. DIBUJAR EL "FANTASMA" (GHOST) SI ESTAMOS ARRASTRANDO
+        // 3. DIBUJAR EL "FANTASMA" (GHOST)
         if (isDraggingTimeline && segmentBeingDragged != null) {
             double ghostW = segmentBeingDragged.getDuration() * pixelsPerSecond;
-            // Lo dibujamos centrado en el cursor (currentDragX es la variable que creamos antes)
             double ghostX = currentDragX - (ghostW / 2.0);
-
-            // Dibujamos con opacidad 0.6 para que sea semitransparente
             drawStyledClip(gcTimeline, segmentBeingDragged, ghostX, topMargin - 5, ghostW, barHeight + 10, 0.6);
         }
 
-        // 4. DIBUJAR REGLA Y CABEZAL (Método separado para limpieza)
+        // 4. ✅ NUEVA BARRA DE INSERCIÓN (iMovie Style)
+        if (isDraggingTimeline && segmentBeingDragged != null && dropIndicatorX != -1) {
+
+            gcTimeline.setStroke(Color.YELLOW);
+            gcTimeline.setLineWidth(1.0);
+            gcTimeline.strokeLine(dropIndicatorX, 0, dropIndicatorX, h); // De arriba a abajo
+
+            // Flecha pequeña amarilla arriba
+            gcTimeline.setFill(Color.YELLOW);
+            double arrowSize = 6.0;
+            double[] xPtsY = { dropIndicatorX - arrowSize, dropIndicatorX + arrowSize, dropIndicatorX };
+            double[] yPtsY = { 0, 0, arrowSize + 2 };
+            gcTimeline.fillPolygon(xPtsY, yPtsY, 3);
+        }
+
+        // 5. DIBUJAR REGLA Y CABEZAL
         drawRulerAndPlayhead(w, h, scrollOffset);
     }
 
@@ -1631,15 +1634,26 @@ public class EditorController {
             }
         }
 
-        // 6. CABEZAL DE REPRODUCCIÓN
+        // CABEZAL DE REPRODUCCIÓN PROFESIONAL
         double phX = (currentTimelineTime * pixelsPerSecond) - scrollOffset;
         if (phX >= 0 && phX <= w) {
+            // 1. Línea vertical fina
             gcTimeline.setStroke(Color.RED);
-            gcTimeline.setLineWidth(2);
+            gcTimeline.setLineWidth(1.0);
             gcTimeline.strokeLine(phX, 0, phX, h);
 
+            // 2. Flecha Pequeña y Suave (Triángulo invertido)
             gcTimeline.setFill(Color.RED);
-            gcTimeline.fillPolygon(new double[]{phX - 7, phX + 7, phX}, new double[]{0, 0, 15}, 3);
+            double arrowSize = 6.0; // Tamaño pequeño para que sea elegante
+
+            // Coordenadas del triángulo: Izquierda, Derecha, Punta (abajo)
+            double[] xPts = { phX - arrowSize, phX + arrowSize, phX };
+            double[] yPts = { 0, 0, arrowSize + 2 };
+
+            gcTimeline.fillPolygon(xPts, yPts, 3);
+
+            // 3. Opcional: Un pequeño círculo en la punta de la flecha para suavizarla
+            gcTimeline.fillOval(phX - 1.5, arrowSize, 3, 3);
         }
     }
 
@@ -1791,18 +1805,17 @@ public class EditorController {
     }
 
     private void recalculateSegmentTimes() {
-        double currentTime = 0.0;
+        if (segments.isEmpty()) return;
 
+        double lastEndTime = 0.0;
         for (VideoSegment seg : segments) {
-            double duration = seg.getDuration(); // La duración se mantiene (SourceEnd - SourceStart)
-
-            seg.setStartTime(currentTime);
-            seg.setEndTime(currentTime + duration);
-
-            currentTime += duration;
+            double duration = seg.getDuration();
+            seg.setStartTime(lastEndTime);
+            seg.setEndTime(lastEndTime + duration);
+            lastEndTime = seg.getEndTime();
         }
 
-        totalTimelineDuration = currentTime;
+        totalTimelineDuration = lastEndTime;
         updateScrollbarAndRedraw();
     }
 
@@ -2455,6 +2468,46 @@ public class EditorController {
         gc.setLineWidth(2.0 * sx); // Borde proporcional
         if (circle) gc.strokeOval(left, top, w, h);
         else gc.strokeRect(left, top, w, h);
+    }
+
+    private void onTimelineDragged(MouseEvent e) {
+        double topMargin = 22;
+
+        if (segmentBeingDragged != null && e.getY() >= topMargin) {
+            // --- LÓGICA iMOVIE: Mover clips ---
+            isDraggingTimeline = true;
+            currentDragX = e.getX();
+            double scrollOffset = timelineScroll.getValue();
+            double mousePosTime = (e.getX() + scrollOffset) / pixelsPerSecond;
+
+            List<VideoSegment> others = new ArrayList<>(segments);
+            others.remove(segmentBeingDragged);
+
+            int newDropIndex = 0;
+            double indicatorTime = 0;
+
+            if (!others.isEmpty()) {
+                for (int i = 0; i < others.size(); i++) {
+                    VideoSegment s = others.get(i);
+                    double midPoint = s.getStartTime() + (s.getDuration() / 2.0);
+                    if (mousePosTime < midPoint) {
+                        newDropIndex = i;
+                        indicatorTime = s.getStartTime();
+                        break;
+                    } else {
+                        newDropIndex = i + 1;
+                        indicatorTime = s.getEndTime();
+                    }
+                }
+            }
+            this.dropIndex = newDropIndex;
+            this.dropIndicatorX = (indicatorTime * pixelsPerSecond) - scrollOffset;
+            redrawTimeline();
+        } else {
+            // --- LÓGICA DE SCRUBBING: Mover el cabezal ---
+            // Si no estamos arrastrando un clip, o si el ratón sube a la regla
+            seekTimeline(e.getX());
+        }
     }
 
 }

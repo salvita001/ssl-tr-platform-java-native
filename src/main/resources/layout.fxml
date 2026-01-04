@@ -134,9 +134,7 @@
                                 <VBox style="-fx-background-color: transparent;">
                                     <children>
                                         <StackPane alignment="CENTER">
-                                            <Canvas fx:id="timelineCanvas" height="110.0" width="1000.0"
-                                                    onMousePressed="#onTimelineClick"
-                                                    onMouseDragged="#onTimelineDrag" />
+                                            <Canvas fx:id="timelineCanvas" height="110.0" width="1000.0" />
 
                                             <ProgressIndicator fx:id="loadingSpinner"
                                                                visible="false"
