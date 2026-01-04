@@ -118,7 +118,7 @@ public class EditorController {
     // AÑADIDAS NUEVAS HERRAMIENTAS AL ENUM
     public enum ToolType {
         CURSOR, PEN, TEXT, ARROW, ARROW_DASHED, ARROW_3D, SPOTLIGHT, BASE, WALL,
-        POLYGON, RECT_SHADED, ZOOM_CIRCLE, ZOOM_RECT, RECTANGLE, CURVE
+        POLYGON, RECT_SHADED, ZOOM_CIRCLE, ZOOM_RECT
     }
     private ToolType currentTool = ToolType.CURSOR;
 
@@ -375,11 +375,10 @@ public class EditorController {
         if(btnRectShaded != null) btnRectShaded.setGraphic(AppIcons.getIcon("rect-shaded", 16));
         if(btnZoomCircle != null) btnZoomCircle.setGraphic(AppIcons.getIcon("zoom-circle", 16));
         if(btnZoomRect != null) btnZoomRect.setGraphic(AppIcons.getIcon("zoom-rect", 16));
-        if(btnUndo != null) btnUndo.setGraphic(AppIcons.getIcon("undo", 20));
-        if(btnRedo != null) btnRedo.setGraphic(AppIcons.getIcon("redo", 20));
+        if(btnUndo != null) btnUndo.setGraphic(AppIcons.getIcon("undo", 16));
+        if(btnRedo != null) btnRedo.setGraphic(AppIcons.getIcon("redo", 16));
         if(btnSkipStart != null) btnSkipStart.setGraphic(AppIcons.getIcon("skipBack", 16));
         if(btnSkipEnd != null) btnSkipEnd.setGraphic(AppIcons.getIcon("skipForward", 16));
-        if(btnCurve != null) btnCurve.setGraphic(AppIcons.getIcon("curve", 16));
     }
 
     // --- SELECTORES HERRAMIENTAS ---
@@ -396,7 +395,6 @@ public class EditorController {
     @FXML public void setToolRectShaded() { changeTool(ToolType.RECT_SHADED); }
     @FXML public void setToolZoomCircle() { changeTool(ToolType.ZOOM_CIRCLE); }
     @FXML public void setToolZoomRect() { changeTool(ToolType.ZOOM_RECT); }
-    @FXML public void setToolCurve() { changeTool(ToolType.CURVE); }
 
     private void changeTool(ToolType type) {
         finishPolyShape();
@@ -407,7 +405,8 @@ public class EditorController {
 
     // --- CORRECCIÓN DEL MURO Y POLÍGONO ---
     private void finishPolyShape() {
-        if (currentShape != null && ("wall".equals(currentShape.getType()) || "polygon".equals(currentShape.getType()))) {
+        if (currentShape != null &&
+                ("wall".equals(currentShape.getType()) || "polygon".equals(currentShape.getType()))) {
             List<Double> pts = currentShape.getPoints();
 
             // Eliminamos los puntos "fantasma" del cursor.
@@ -573,22 +572,6 @@ public class EditorController {
                 return;
             }
 
-            // C. CASO CURVA
-            if (currentTool == ToolType.CURVE) {
-                saveState();
-                currentShape = new DrawingShape("c"+System.currentTimeMillis(), "curve", e.getX(), e.getY(), toHex(c));
-
-                // --- AÑADIR ESTO ---
-                if (currentSeg != null) currentShape.setClipId(currentSeg.getId());
-                // -------------------
-
-                currentShape.setStrokeWidth(s);
-                currentShape.addPoint(e.getX(), e.getY());
-                shapes.add(currentShape);
-                redrawVideoCanvas();
-                return;
-            }
-
             // D. ARRASTRE NORMAL (Flechas, Rectángulos, etc.)
             String type = switch(currentTool) {
                 case ARROW -> "arrow";
@@ -607,11 +590,13 @@ public class EditorController {
 
             currentShape = new DrawingShape("s"+System.currentTimeMillis(), type, e.getX(), e.getY(), toHex(c));
 
-            // --- AÑADIR ESTO ---
             if (currentSeg != null) currentShape.setClipId(currentSeg.getId());
-            // -------------------
-
             currentShape.setStrokeWidth(s);
+            // ✅ NUEVO: Añadir punto de control por defecto para la flecha 3D
+            if ("arrow-3d".equals(type)) {
+                // Ponemos el punto de control un poco más arriba del inicio para dar curvatura inicial
+                currentShape.addPoint(e.getX(), e.getY() - 50);
+            }
             shapes.add(currentShape);
         });
 
@@ -638,7 +623,7 @@ public class EditorController {
                         pts.set(dragPointIndex + 1, pts.get(dragPointIndex + 1) + dy);
                     }
                 } // MOVER PUNTO DE CONTROL DE CURVA
-                else if (dragMode == 6 && "curve".equals(selectedShapeToMove.getType())) {
+                else if (dragMode == 6 && "arrow-3d".equals(selectedShapeToMove.getType())) {
                     List<Double> pts = selectedShapeToMove.getPoints();
                     if (!pts.isEmpty()) {
                         pts.set(0, pts.get(0) + dx); // Mover X del control
@@ -653,12 +638,6 @@ public class EditorController {
             } else if (currentShape != null && currentTool != ToolType.POLYGON) {
                 currentShape.setEndX(e.getX());
                 currentShape.setEndY(e.getY());
-                if (currentTool == ToolType.CURVE && !currentShape.getPoints().isEmpty()) {
-                    double midX = (currentShape.getStartX() + e.getX()) / 2;
-                    double midY = (currentShape.getStartY() + e.getY()) / 2;
-                    currentShape.getPoints().set(0, midX);
-                    currentShape.getPoints().set(1, midY);
-                }
                 redrawVideoCanvas();
             }
 
@@ -692,17 +671,6 @@ public class EditorController {
             return false;
         }
 
-        // 2. CURVA (Punto de Control)
-        if ("curve".equals(s.getType()) && !s.getPoints().isEmpty()) {
-            double cx = s.getPoints().get(0);
-            double cy = s.getPoints().get(1);
-            // Si haces clic en el punto de control (el de en medio)
-            if (Math.abs(mx - cx) < dist && Math.abs(my - cy) < dist) {
-                dragMode = 6; // MODO 6: MOVER CURVATURA
-                return true;
-            }
-        }
-
         // 2. CASO TEXTO (Redimensión especial)
         if ("text".equals(s.getType())) {
             javafx.scene.text.Text temp = new javafx.scene.text.Text(s.getTextValue());
@@ -718,6 +686,16 @@ public class EditorController {
                 return true;
             }
             return false;
+        }
+
+        // ✅ NUEVO: CASO ARROW-3D (Punto de Control)
+        if ("arrow-3d".equals(s.getType()) && !s.getPoints().isEmpty()) {
+            double cx = s.getPoints().get(0);
+            double cy = s.getPoints().get(1);
+            if (Math.abs(mx - cx) < dist && Math.abs(my - cy) < dist) {
+                dragMode = 6; // Reutilizamos el modo de movimiento de control
+                return true;
+            }
         }
 
         // C. FORMAS ESTÁNDAR (Flechas, Muro, Zoom, etc.)
@@ -833,27 +811,20 @@ public class EditorController {
                 } else {
                     gcDraw.setLineDashes(null);
                     gcDraw.setFill(Color.CYAN);
-                    gcDraw.setStroke(Color.WHITE);
-                    gcDraw.setLineWidth(1);
-
-                    // Punto A (Inicio)
                     gcDraw.fillOval(s.getStartX() - 5, s.getStartY() - 5, 10, 10);
-                    gcDraw.strokeOval(s.getStartX() - 5, s.getStartY() - 5, 10, 10);
-
-                    // Punto B (Fin)
                     gcDraw.fillOval(s.getEndX() - 5, s.getEndY() - 5, 10, 10);
-                    gcDraw.strokeOval(s.getEndX() - 5, s.getEndY() - 5, 10, 10);
 
-                    if ("curve".equals(s.getType()) && !s.getPoints().isEmpty()) {
+                    // ✅ NUEVO: DIBUJAR PUNTO DE CONTROL PARA FLECHA 3D
+                    if ("arrow-3d".equals(s.getType()) && !s.getPoints().isEmpty()) {
                         double cx = s.getPoints().get(0);
                         double cy = s.getPoints().get(1);
 
-                        // Líneas guía (opcional, ayuda visual)
+                        // Líneas guía punteadas
                         gcDraw.setStroke(Color.GRAY); gcDraw.setLineWidth(1); gcDraw.setLineDashes(3);
                         gcDraw.strokeLine(x1, y1, cx, cy);
                         gcDraw.strokeLine(x2, y2, cx, cy);
 
-                        // Punto de control
+                        // Círculo amarillo de control (Radio)
                         gcDraw.setLineDashes(null);
                         gcDraw.setFill(Color.YELLOW); gcDraw.setStroke(Color.BLACK);
                         gcDraw.fillOval(cx - 6, cy - 6, 12, 12);
@@ -868,8 +839,16 @@ public class EditorController {
                 case "arrow": drawProArrow(x1, y1, x2, y2, c, size, false); break;
                 case "arrow-dashed": drawProArrow(x1, y1, x2, y2, c, size, true); break;
                 case "arrow-3d":
-                    double cx = (x1 + x2) / 2; double cy = Math.min(y1, y2) - Math.abs(x2 - x1) * 0.3;
-                    drawCurvedArrow(x1, y1, cx, cy, x2, y2, c, size);
+                    if (!s.getPoints().isEmpty()) {
+                        double ctrlX = s.getPoints().get(0);
+                        double ctrlY = s.getPoints().get(1);
+                        drawCurvedArrow(x1, y1, ctrlX, ctrlY, x2, y2, c, size);
+                    } else {
+                        // Fallback por si acaso
+                        double midX = (x1 + x2) / 2;
+                        double midY = Math.min(y1, y2) - 50;
+                        drawCurvedArrow(x1, y1, midX, midY, x2, y2, c, size);
+                    }
                     break;
                 case "pen":
                     // Dibujamos el lápiz conectando todos los puntos
@@ -922,38 +901,6 @@ public class EditorController {
                         // Relleno de color
                         gcDraw.setFill(c);
                         gcDraw.fillText(s.getTextValue(), x1, y1);
-                    }
-                    break;
-                case "curve":
-                    if (s.getPoints() != null && !s.getPoints().isEmpty()) {
-                        double c_x = s.getPoints().get(0);
-                        double c_y = s.getPoints().get(1);
-
-                        // 1. CALCULAR ÁNGULO Y PUNTO DE CORTE
-                        // Calculamos el ángulo desde el punto de control hacia el final
-                        double angle = Math.atan2(y2 - c_y, x2 - c_x);
-
-                        // Calculamos la longitud de la cabeza de la flecha (la misma que usas en drawArrowHead)
-                        double arrowLen = size * 1.5;
-
-                        // Calculamos dónde debe terminar la línea (retrocedemos desde la punta)
-                        // Esto evita que el grosor de la línea tape la punta afilada
-                        double lineEndX = x2 - arrowLen * Math.cos(angle);
-                        double lineEndY = y2 - arrowLen * Math.sin(angle);
-
-                        // 2. DIBUJAR LA LÍNEA CURVA (HASTA LA BASE DE LA FLECHA)
-                        gcDraw.setStroke(c);
-                        gcDraw.setLineWidth(size);
-                        gcDraw.setLineCap(javafx.scene.shape.StrokeLineCap.ROUND);
-
-                        gcDraw.beginPath();
-                        gcDraw.moveTo(x1, y1);
-                        // Usamos lineEndX/Y en lugar de x2/y2 para la curva
-                        gcDraw.quadraticCurveTo(c_x, c_y, lineEndX, lineEndY);
-                        gcDraw.stroke();
-
-                        // 3. DIBUJAR LA PUNTA DE FLECHA (EN EL PUNTO FINAL REAL)
-                        drawArrowHead(x2, y2, angle, size, c);
                     }
                     break;
                 default:
@@ -1074,11 +1021,29 @@ public class EditorController {
     }
 
     private void drawCurvedArrow(double x1, double y1, double cx, double cy, double x2, double y2, Color color, double size) {
-        gcDraw.setStroke(color); gcDraw.setFill(color); gcDraw.setLineWidth(size / 3.0); gcDraw.setLineDashes(null);
-        gcDraw.beginPath(); gcDraw.moveTo(x1, y1); gcDraw.quadraticCurveTo(cx, cy, x2, y2); gcDraw.stroke();
+        gcDraw.setStroke(color);
+        gcDraw.setFill(color);
+        gcDraw.setLineWidth(size / 3.0);
+
+        // 1. Calcular el ángulo de la punta basado en el punto de control
         double angle = Math.atan2(y2 - cy, x2 - cx);
+        double headLen = size * 1.5;
+
+        // 2. RETROCESO: La línea termina un poco antes para no tapar la punta afilada
+        double lineEndX = x2 - (headLen * 0.5) * Math.cos(angle);
+        double lineEndY = y2 - (headLen * 0.5) * Math.sin(angle);
+
+        // 3. Dibujar la curva
+        gcDraw.beginPath();
+        gcDraw.moveTo(x1, y1);
+        gcDraw.quadraticCurveTo(cx, cy, lineEndX, lineEndY);
+        gcDraw.stroke();
+
+        // 4. Dibujar la punta de flecha en la coordenada real final
         drawArrowHead(x2, y2, angle, size, color);
-        gcDraw.fillOval(x1 - size/4, y1 - size/4, size/2, size/2);
+
+        // 5. Círculo en la base (estilo iMovie)
+        gcDraw.fillOval(x1 - size/6, y1 - size/6, size/3, size/3);
     }
 
     private void drawArrowHead(double x, double y, double angle, double size, Color color) {
@@ -1196,7 +1161,6 @@ public class EditorController {
                     double drift = Math.abs(currentRealVideoTime - expectedRealTime);
 
                     // 4. CORRECCIÓN DE DESFASE
-                    // Si el error es mayor a 0.25s, forzamos la sincronización
                     if (drift > 0.25) {
                         System.out.println("Corrección de desfase: " + drift + "s. Sincronizando...");
                         performSafeSeek((expectedRealTime / totalOriginalDuration) * 100.0);
@@ -1243,9 +1207,8 @@ public class EditorController {
         });
     }
 
-// --- MÉTODOS AUXILIARES ---
+    // --- MÉTODOS AUXILIARES ---
 
-    // Método centralizado para saltar de forma segura
     private void performSafeSeek(double percent) {
         // 1. Ponemos la venda: Ignorar updates durante 1 segundo (1000ms)
         // Esto da tiempo al video a moverse y estabilizarse
@@ -1287,7 +1250,16 @@ public class EditorController {
         }
     }
 
-    private void checkAutoScroll() { if (totalTimelineDuration <= 0) return; double w = timelineCanvas.getWidth(); double playheadPos = (currentTimelineTime * pixelsPerSecond) - timelineScroll.getValue(); if (playheadPos > w) { timelineScroll.setValue(timelineScroll.getValue() + playheadPos - w + 50); } else if (playheadPos < 0) { timelineScroll.setValue(timelineScroll.getValue() + playheadPos - 50); } }
+    private void checkAutoScroll() {
+        if (totalTimelineDuration <= 0) return;
+        double w = timelineCanvas.getWidth();
+        double playheadPos = (currentTimelineTime * pixelsPerSecond) - timelineScroll.getValue();
+        if (playheadPos > w) {
+            timelineScroll.setValue(timelineScroll.getValue() + playheadPos - w + 50);
+        } else if (playheadPos < 0) {
+            timelineScroll.setValue(timelineScroll.getValue() + playheadPos - 50);
+        }
+    }
 
     private void checkPlaybackJump() {
         VideoSegment currentSeg = getCurrentSegment();
@@ -1316,8 +1288,51 @@ public class EditorController {
         }
     }
 
-    @FXML public void onCaptureFrame() { if (segments.isEmpty()) return; if (videoService.isPlaying()) onPlayPause(); TextInputDialog dialog = new TextInputDialog("3"); dialog.setTitle("Capturar Frame"); dialog.setHeaderText("Congelar imagen"); dialog.setContentText("Duración en segundos:"); Optional<String> result = dialog.showAndWait(); if (result.isPresent()) { try { double duration = Double.parseDouble(result.get()); if (duration <= 0) return; insertFreezeFrame(duration); } catch (NumberFormatException e) {} } }
-    private void insertFreezeFrame(double duration) { VideoSegment activeSeg = null; for (VideoSegment seg : segments) { if (currentTimelineTime >= seg.getStartTime() && currentTimelineTime < seg.getEndTime()) { activeSeg = seg; break; } } if (activeSeg != null) { double splitTimeTimeline = currentTimelineTime; double splitTimeSource = activeSeg.getSourceStartTime() + (currentTimelineTime - activeSeg.getStartTime()); double originalEndTimeTimeline = activeSeg.getEndTime(); double originalEndTimeSource = activeSeg.getSourceEndTime(); activeSeg.setEndTime(splitTimeTimeline); activeSeg.setSourceEndTime(splitTimeSource); VideoSegment freezeSeg = new VideoSegment(splitTimeTimeline, splitTimeTimeline + duration, splitTimeSource, splitTimeSource, "#00bcd4", true); String colorRight = activeSeg.getColor().equals("#3b82f6") ? "#10b981" : "#3b82f6"; VideoSegment rightSeg = new VideoSegment(splitTimeTimeline + duration, originalEndTimeTimeline + duration, splitTimeSource, originalEndTimeSource, colorRight, false); int idx = segments.indexOf(activeSeg); segments.add(idx + 1, freezeSeg); segments.add(idx + 2, rightSeg); for (int i = idx + 3; i < segments.size(); i++) { VideoSegment s = segments.get(i); s.setStartTime(s.getStartTime() + duration); s.setEndTime(s.getEndTime() + duration); } totalTimelineDuration += duration; updateScrollbarAndRedraw(); } }
+    @FXML public void onCaptureFrame() {
+        if (segments.isEmpty()) return;
+        if (videoService.isPlaying()) onPlayPause();
+        TextInputDialog dialog = new TextInputDialog("3");
+        dialog.setTitle("Capturar Frame");
+        dialog.setHeaderText("Congelar imagen");
+        dialog.setContentText("Duración en segundos:");
+        Optional<String> result = dialog.showAndWait();
+        if (result.isPresent()) {
+            try {
+                double duration = Double.parseDouble(result.get());
+                if (duration <= 0) return;
+                insertFreezeFrame(duration);
+            } catch (NumberFormatException e) {}
+        }
+    }
+
+    private void insertFreezeFrame(double duration) {
+        VideoSegment activeSeg = null;
+        for (VideoSegment seg : segments) {
+            if (currentTimelineTime >= seg.getStartTime() && currentTimelineTime < seg.getEndTime()) {
+                activeSeg = seg; break;
+            }
+        }
+        if (activeSeg != null) {
+            double splitTimeTimeline = currentTimelineTime;
+            double splitTimeSource = activeSeg.getSourceStartTime() + (currentTimelineTime - activeSeg.getStartTime());
+            double originalEndTimeTimeline = activeSeg.getEndTime();
+            double originalEndTimeSource = activeSeg.getSourceEndTime();
+            activeSeg.setEndTime(splitTimeTimeline);
+            activeSeg.setSourceEndTime(splitTimeSource);
+            VideoSegment freezeSeg = new VideoSegment(splitTimeTimeline, splitTimeTimeline + duration, splitTimeSource, splitTimeSource, "#00bcd4", true);
+            String colorRight = activeSeg.getColor().equals("#3b82f6") ? "#10b981" : "#3b82f6";
+            VideoSegment rightSeg = new VideoSegment(splitTimeTimeline + duration, originalEndTimeTimeline + duration, splitTimeSource, originalEndTimeSource, colorRight, false);
+            int idx = segments.indexOf(activeSeg);
+            segments.add(idx + 1, freezeSeg);
+            segments.add(idx + 2, rightSeg);
+            for (int i = idx + 3; i < segments.size(); i++) {
+                VideoSegment s = segments.get(i);
+                s.setStartTime(s.getStartTime() + duration);
+                s.setEndTime(s.getEndTime() + duration);
+            } totalTimelineDuration += duration;
+            updateScrollbarAndRedraw();
+        }
+    }
 
     @FXML public void onCutVideo() {
         saveState();
@@ -1622,9 +1637,24 @@ public class EditorController {
         }
     }
 
-    private void updateScrollbarAndRedraw() { if (totalTimelineDuration <= 0) return; double canvasW = timelineCanvas.getWidth(); double totalW = totalTimelineDuration * pixelsPerSecond; timelineScroll.setMax(Math.max(0, totalW - canvasW)); timelineScroll.setVisibleAmount((canvasW / totalW) * timelineScroll.getMax()); redrawTimeline(); }
-    private void updateTimeLabel() { int m = (int) currentTimelineTime / 60; int s = (int) currentTimelineTime % 60; lblTime.setText(String.format("%02d:%02d", m, s) + " / " + String.format("%02d:%02d", (int)totalTimelineDuration/60, (int)totalTimelineDuration%60)); }
-    private String formatShortTime(int totalSeconds) { int m = totalSeconds / 60; int s = totalSeconds % 60; return (m > 0) ? String.format("%d:%02d", m, s) : s + "s"; }
+    private void updateScrollbarAndRedraw() {
+        if (totalTimelineDuration <= 0) return;
+        double canvasW = timelineCanvas.getWidth();
+        double totalW = totalTimelineDuration * pixelsPerSecond; timelineScroll.setMax(Math.max(0, totalW - canvasW));
+        timelineScroll.setVisibleAmount((canvasW / totalW) * timelineScroll.getMax());
+        redrawTimeline();
+    }
+
+    private void updateTimeLabel() {
+        int m = (int) currentTimelineTime / 60; int s = (int) currentTimelineTime % 60;
+        lblTime.setText(String.format("%02d:%02d", m, s) + " / " + String.format("%02d:%02d", (int)totalTimelineDuration/60, (int)totalTimelineDuration%60));
+    }
+
+    private String formatShortTime(int totalSeconds) {
+        int m = totalSeconds / 60;
+        int s = totalSeconds % 60;
+        return (m > 0) ? String.format("%d:%02d", m, s) : s + "s";
+    }
 
     public void onImportVideo() {
         FileChooser fc = new FileChooser();
@@ -1732,7 +1762,24 @@ public class EditorController {
         redrawVideoCanvas();
     }
 
-    @FXML public void onPlayPause() { if (videoService.isPlaying() || isPlayingFreeze) { videoService.pause(); if (isPlayingFreeze) { freezeTimer.stop(); isPlayingFreeze = false; } btnPlayPause.setText("▶"); isProcessingAI.set(false); } else { checkPlaybackJump(); if (!isPlayingFreeze) { videoService.play(); } btnPlayPause.setText("||"); } }
+    @FXML public void onPlayPause() {
+        if (videoService.isPlaying() || isPlayingFreeze) {
+            videoService.pause();
+            if (isPlayingFreeze) {
+                freezeTimer.stop();
+                isPlayingFreeze = false;
+            }
+            btnPlayPause.setText("▶");
+            isProcessingAI.set(false);
+        } else {
+            checkPlaybackJump();
+            if (!isPlayingFreeze) {
+                videoService.play();
+            }
+            btnPlayPause.setText("||");
+        }
+    }
+
     @FXML
     public void onSkipToStart() {
         currentTimelineTime = 0;
@@ -2209,19 +2256,6 @@ public class EditorController {
                     gc.strokeText(s.getTextValue(), x1, y1);
                     gc.setFill(c);
                     gc.fillText(s.getTextValue(), x1, y1);
-                }
-                break;
-            case "curve":
-                if (s.getPoints() != null && !s.getPoints().isEmpty()) {
-                    double ctrlX = (s.getPoints().get(0) - offX) * sx;
-                    double ctrlY = (s.getPoints().get(1) - offY) * sy;
-                    double angle = Math.atan2(y2 - ctrlY, x2 - ctrlX);
-                    double arrowLen = size * 1.5;
-                    gc.beginPath();
-                    gc.moveTo(x1, y1);
-                    gc.quadraticCurveTo(ctrlX, ctrlY, x2 - arrowLen * Math.cos(angle), y2 - arrowLen * Math.sin(angle));
-                    gc.stroke();
-                    drawArrowHeadOnGC(gc, x2, y2, angle, size, c);
                 }
                 break;
             case "zoom-circle":

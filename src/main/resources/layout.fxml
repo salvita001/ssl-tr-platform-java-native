@@ -56,7 +56,6 @@
                     <ToggleButton fx:id="btnWall" onAction="#setToolWall" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
                     <ToggleButton fx:id="btnRectShaded" onAction="#setToolRectShaded" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
                     <ToggleButton fx:id="btnPolygon" onAction="#setToolPolygon" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
-                    <ToggleButton fx:id="btnCurve" onAction="#setToolCurve" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
                 </HBox>
 
                 <HBox spacing="5" style="-fx-background-color: #2a2a2a; -fx-background-radius: 5; -fx-padding: 2;">
