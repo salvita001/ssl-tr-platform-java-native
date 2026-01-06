@@ -32,40 +32,40 @@
                 <Separator orientation="VERTICAL" />
 
                 <HBox spacing="5" style="-fx-background-color: #2a2a2a; -fx-background-radius: 5; -fx-padding: 2;">
-                    <Button fx:id="btnUndo" onAction="#onUndo" text="" style="-fx-background-color: transparent; -fx-text-fill: white; -fx-font-size: 14;" />
-                    <Button fx:id="btnRedo" onAction="#onRedo" text="" style="-fx-background-color: transparent; -fx-text-fill: white; -fx-font-size: 14;" />
+                    <Button fx:id="btnUndo" onAction="#onUndo" text="" prefWidth="30.0" prefHeight="30.0" style="-fx-background-color: transparent; -fx-text-fill: white; -fx-font-size: 14;" />
+                    <Button fx:id="btnRedo" onAction="#onRedo" text="" prefWidth="30.0" prefHeight="30.0" style="-fx-background-color: transparent; -fx-text-fill: white; -fx-font-size: 14;" />
                 </HBox>
 
                 <HBox spacing="5" style="-fx-background-color: #2a2a2a; -fx-background-radius: 5; -fx-padding: 2;">
-                    <ToggleButton fx:id="btnCursor" onAction="#setToolCursor" text="" selected="true" style="-fx-background-radius: 5;">
+                    <ToggleButton fx:id="btnCursor" onAction="#setToolCursor" prefWidth="30.0" prefHeight="30.0" text="" selected="true" style="-fx-background-radius: 5;">
                         <toggleGroup>
                             <ToggleGroup fx:id="toolsGroup"/>
                         </toggleGroup>
                     </ToggleButton>
-                    <ToggleButton fx:id="btnPen" onAction="#setToolPen" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
-                    <ToggleButton fx:id="btnText" onAction="#setToolText" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
+                    <ToggleButton fx:id="btnPen" onAction="#setToolPen" prefWidth="30.0" prefHeight="30.0" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
+                    <ToggleButton fx:id="btnText" onAction="#setToolText" prefWidth="30.0" prefHeight="30.0" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
                 </HBox>
 
                 <HBox spacing="5" style="-fx-background-color: #2a2a2a; -fx-background-radius: 5; -fx-padding: 2;">
-                    <ToggleButton fx:id="btnArrow" onAction="#setToolArrow" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
-                    <ToggleButton fx:id="btnArrowDashed" onAction="#setToolArrowDashed" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
-                    <ToggleButton fx:id="btnArrow3D" onAction="#setToolArrow3D" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
+                    <ToggleButton fx:id="btnArrow" onAction="#setToolArrow" prefWidth="30.0" prefHeight="30.0" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
+                    <ToggleButton fx:id="btnArrowDashed" onAction="#setToolArrowDashed" prefWidth="30.0" prefHeight="30.0" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
+                    <ToggleButton fx:id="btnArrow3D" onAction="#setToolArrow3D" prefWidth="30.0" prefHeight="30.0" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
 
-                    <ToggleButton fx:id="btnSpotlight" onAction="#setToolSpotlight" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
-                    <ToggleButton fx:id="btnBase" onAction="#setToolBase" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
-                    <ToggleButton fx:id="btnWall" onAction="#setToolWall" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
-                    <ToggleButton fx:id="btnRectShaded" onAction="#setToolRectShaded" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
-                    <ToggleButton fx:id="btnPolygon" onAction="#setToolPolygon" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
+                    <ToggleButton fx:id="btnSpotlight" onAction="#setToolSpotlight" prefWidth="30.0" prefHeight="30.0" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
+                    <ToggleButton fx:id="btnBase" onAction="#setToolBase" prefWidth="30.0" prefHeight="30.0" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
+                    <ToggleButton fx:id="btnWall" onAction="#setToolWall" prefWidth="30.0" prefHeight="30.0" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
+                    <ToggleButton fx:id="btnRectShaded" onAction="#setToolRectShaded" prefWidth="30.0" prefHeight="30.0" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
+                    <ToggleButton fx:id="btnPolygon" onAction="#setToolPolygon" prefWidth="30.0" prefHeight="30.0" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
                 </HBox>
 
                 <HBox spacing="5" style="-fx-background-color: #2a2a2a; -fx-background-radius: 5; -fx-padding: 2;">
-                    <ToggleButton fx:id="btnZoomCircle" onAction="#setToolZoomCircle" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
-                    <ToggleButton fx:id="btnZoomRect" onAction="#setToolZoomRect" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
+                    <ToggleButton fx:id="btnZoomCircle" onAction="#setToolZoomCircle" prefWidth="30.0" prefHeight="30.0" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
+                    <ToggleButton fx:id="btnZoomRect" onAction="#setToolZoomRect" prefWidth="30.0" prefHeight="30.0" text="" toggleGroup="$toolsGroup" style="-fx-background-radius: 5;" />
                 </HBox>
 
                 <Region HBox.hgrow="ALWAYS" />
 
-                <Button text="EXPORTAR MP4" onAction="#onExportVideo" style="-fx-background-color: #16a34a; -fx-text-fill: white; -fx-font-weight: bold;" />
+                <Button text="EXPORTAR" onAction="#onExportVideo" style="-fx-background-color: #16a34a; -fx-text-fill: white; -fx-font-weight: bold;" />
             </children>
         </HBox>
     </top>

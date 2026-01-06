@@ -5,7 +5,7 @@ import javafx.scene.image.Image;
 import java.util.UUID;
 
 public class VideoSegment {
-    private final String id = UUID.randomUUID().toString();
+    private String id = UUID.randomUUID().toString();
     private double startTime;       // Inicio en el Timeline
     private double endTime;         // Fin en el Timeline
     private double sourceStartTime; // Inicio en el Video Original
@@ -65,6 +65,11 @@ public class VideoSegment {
     public String getId() {
         return id;
     }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
 
     public VideoSegment copy() {
         VideoSegment clone = new VideoSegment(startTime, endTime, sourceStartTime, sourceEndTime, color, isFreezeFrame);

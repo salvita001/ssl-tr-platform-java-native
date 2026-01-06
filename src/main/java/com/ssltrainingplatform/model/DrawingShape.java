@@ -117,14 +117,18 @@ public class DrawingShape {
     }
 
     public DrawingShape copy() {
-        DrawingShape clone = new DrawingShape(this.id, this.type, this.startX, this.startY, this.color);
-        clone.setEndX(this.endX);
-        clone.setEndY(this.endY);
-        clone.setStrokeWidth(this.strokeWidth);
-        clone.setTextValue(this.textValue);
-        clone.setClipId(this.clipId);
-        clone.getPoints().addAll(this.points); // Copiar lista de puntos
-        return clone;
+        DrawingShape replica = new DrawingShape(this.id, this.type, this.startX, this.startY, this.color);
+        replica.setEndX(this.endX);
+        replica.setEndY(this.endY);
+        replica.setStrokeWidth(this.strokeWidth);
+        replica.setTextValue(this.textValue);
+        replica.setClipId(this.clipId);
+
+        // Clonar la lista de puntos (vital para polígonos y flechas 3D)
+        if (this.points != null) {
+            replica.setPoints(new ArrayList<>(this.points));
+        }
+        return replica;
     }
 
     // --- GETTERS Y SETTERS ---

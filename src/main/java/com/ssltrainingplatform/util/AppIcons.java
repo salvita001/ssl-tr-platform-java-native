@@ -41,21 +41,21 @@ public class AppIcons {
             // Flecha Discontinua (Icono visual representando el estilo)
             case "arrow-dashed" -> "M4 11h2v2H4zm4 0h2v2H8zm4 0h2v2h-2zm4 0h2v2h-2z M20 12l-3.99-4v3H16v2h.01v3z";
             // Flecha Curva 3D
-            case "arrow-3d" -> "M19 6c0-1.1-.9-2-2-2H8c-1.1 0-2 .9-2 2v3h-2l4 4 4-4h-2V6h11v5h2V6z";
+            case "arrow-3d" -> "M4 15c0-5 4-9 9-9 3 0 5.5 1.5 7 4M16 8l4 2-2 4";
 
             // Foco (Spotlight)
-            case "spotlight" -> "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z";
+            case "spotlight" -> "M12 2L4 22h16L12 2zm0 4l5 14H7l5-14z";
             // Base (Doble círculo)
-            case "base" -> "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z";
+            case "base" -> "M12 15c-4.4 0-8 1.3-8 3s3.6 3 8 3 8-1.3 8-3-3.6-3-8-3zM12 17c2.2 0 4 .4 4 1s-1.8 1-4 1-4-.4-4-1 1.8-1 4-1z";
 
             // Muro (Wall)
-            case "wall" -> "M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z";
+            case "wall" -> "M2 17h20v2H2v-2z M5 8h3v9H5V8z M11 4h2v13h-2V4z M17 8h3v9h-3V8z";
 
             // Polígono
-            case "polygon" -> "M12 2l-5.5 9h11z"; // Triángulo simple que representa polígono
+            case "polygon" -> "M12 3l7 5-2 11h-10l-2-11z"; // Triángulo simple que representa polígono
 
             // Rectángulo Sombreado
-            case "rect-shaded" -> "M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14z";
+            case "rect-shaded" -> "M3 3h18v18H3V3zm2 2v14h14V5H5z M7 7h10v2H7V7z M7 11h10v2H7v-2z";
 
             // Lupa
             case "zoom-circle" -> "M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z";
