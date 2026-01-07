@@ -1,0 +1,138 @@
+/* --- CONFIGURACIÓN GLOBAL --- */
+.main-bg { -fx-background-color: #0a0a0a; }
+
+/* --- PANEL LATERAL (Sidebar) --- */
+.tool-sidebar {
+    -fx-background-color: #1e1e1e;
+    -fx-background-radius: 15;
+    -fx-padding: 15;
+    -fx-border-color: #2a2a2a;
+    -fx-border-radius: 15;
+}
+
+.sidebar-label { -fx-text-fill: #666; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 5 0; }
+
+.tool-button { -fx-background-color: #2a2a2a; -fx-background-radius: 10; -fx-cursor: hand; }
+.tool-button:selected { -fx-background-color: #bbbbbb; }
+
+/* --- GROSOR (Dots) --- */
+.thickness-bar { -fx-background-color: #2a2a2a; -fx-background-radius: 10; -fx-padding: 8; }
+.dot-button { -fx-background-color: #666; -fx-background-radius: 50; -fx-cursor: hand; }
+.dot-button:selected { -fx-background-color: #7c3aed; }
+
+/* --- CONTROLES INFERIORES --- */
+.bottom-toolbar {
+    -fx-background-color: #1e1e1e;
+    -fx-background-radius: 15;
+    -fx-padding: 10 20;
+    -fx-border-color: #2a2a2a;
+    -fx-border-radius: 15;
+}
+
+.transport-btn { -fx-background-color: transparent; -fx-text-fill: white; -fx-cursor: hand; }
+.time-label { -fx-text-fill: #7c3aed; -fx-font-family: 'Monospaced'; -fx-font-weight: bold; }
+.action-btn { -fx-background-color: #16a34a; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8; -fx-padding: 8 20; }
+
+/* --- TIMELINE (Bordes Redondeados y Sin Línea Gris) --- */
+.timeline-container {
+    -fx-background-color: #111111;
+    -fx-background-radius: 15;     /* Bordes redondeados */
+    -fx-border-color: #222222;     /* Línea muy sutil, casi negra */
+    -fx-border-radius: 15;
+    -fx-border-width: 1;
+    -fx-padding: 10;
+}
+
+.timeline-scroll { -fx-background-color: transparent; -fx-pref-height: 6px; }
+.timeline-scroll .thumb { -fx-background-color: #444; -fx-background-radius: 10; }
+
+/* --- ESTILO PARA EL SLIDER DE ZOOM --- */
+.slider .track {
+    -fx-pref-height: 2px; /* Línea muy fina */
+    -fx-background-color: #bdbbbb;
+    -fx-background-insets: 0;
+}
+
+.slider .thumb {
+    -fx-pref-width: 2px;  /* Ancho de la raya vertical */
+    -fx-pref-height: 14px; /* Altura de la raya vertical */
+    -fx-background-color: #7c3aed; /* Morado corporativo */
+    -fx-background-radius: 0; /* Bordes rectos para que parezca una raya */
+    -fx-padding: 0;
+}
+
+.slider .thumb:hover {
+    -fx-background-color: white;
+    -fx-scale-x: 1.5; /* Se ensancha un poco al pasar el ratón */
+}
+
+/* --- BARRA INFERIOR (Ajuste de Padding) --- */
+.bottom-bar-container {
+    -fx-background-color: #1e1e1e;
+    -fx-background-radius: 15;
+    -fx-padding: 5 15; /* ✅ Reducido de 10 20 para que los botones queden más cerca del borde */
+    -fx-border-color: #2a2a2a;
+    -fx-border-radius: 15;
+}
+
+/* --- SELECTOR DE GROSOR (Círculos Perfectos) --- */
+.thickness-bar {
+    -fx-background-color: #2a2a2a;
+    -fx-background-radius: 12;
+    -fx-padding: 6; /* ✅ Espacio interno ajustado */
+    -fx-spacing: 10;
+}
+
+.dot-button {
+    -fx-background-color: #666666;
+    -fx-background-radius: 999; /* ✅ Radio máximo para círculo perfecto */
+    -fx-cursor: hand;
+}
+
+/* ✅ Forzamos dimensiones 1:1 en CSS para evitar que se estiren */
+.dot-small { -fx-min-width: 8; -fx-min-height: 8; -fx-max-width: 8; -fx-max-height: 8; }
+.dot-med   { -fx-min-width: 12; -fx-min-height: 12; -fx-max-width: 12; -fx-max-height: 12; }
+.dot-large { -fx-min-width: 16; -fx-min-height: 16; -fx-max-width: 16; -fx-max-height: 16; }
+.dot-extra { -fx-min-width: 20; -fx-min-height: 20; -fx-max-width: 20; -fx-max-height: 20; }
+
+.dot-button:selected {
+    -fx-background-color: #7c3aed;
+}
+
+/* --- ESTILO PARA EL COLOR PICKER (Sin Flecha) --- */
+.color-picker {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-background-radius: 0;
+    -fx-padding: 0;
+    -fx-cursor: hand;
+}
+
+/* Ocultar el botón de la flecha por completo */
+.color-picker .arrow-button {
+    -fx-padding: 0;
+    -fx-width: 0;
+    -fx-min-width: 0;
+    -fx-max-width: 0;
+    -fx-pref-width: 0;
+}
+
+.color-picker .arrow-button .arrow {
+    -fx-shape: none; /* Elimina la forma de la flecha */
+    -fx-padding: 0;
+}
+
+/* Estilo del "cuadrado" o círculo de color */
+.color-picker .color-picker-label {
+    -fx-padding: 0;
+    -fx-alignment: CENTER;
+}
+
+.color-picker .color-rect {
+    -fx-background-radius: 999; /* ✅ Círculo perfecto (puedes poner 5 para cuadrado) */
+    -fx-min-width: 35;
+    -fx-min-height: 35;
+    -fx-max-width: 35;
+    -fx-max-height: 35;
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.4), 5, 0, 0, 0);
+}

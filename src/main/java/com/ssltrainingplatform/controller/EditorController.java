@@ -30,6 +30,7 @@ import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.paint.CycleMethod;
 import javafx.scene.paint.LinearGradient;
@@ -50,6 +51,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 
 public class EditorController {
@@ -120,7 +122,7 @@ public class EditorController {
     // AÑADIDAS NUEVAS HERRAMIENTAS AL ENUM
     public enum ToolType {
         CURSOR, PEN, TEXT, ARROW, ARROW_DASHED, ARROW_3D, SPOTLIGHT, BASE, WALL,
-        POLYGON, RECT_SHADED, ZOOM_CIRCLE, ZOOM_RECT
+        POLYGON, RECT_SHADED, ZOOM_CIRCLE, ZOOM_RECT, TRACKING
     }
     private ToolType currentTool = ToolType.CURSOR;
 
@@ -156,11 +158,32 @@ public class EditorController {
 
     private long lastScrubTime = 0;
 
+    // 2. Variables de estado de seguimiento
+    private DetectedObjects.DetectedObject trackedObject = null;
+    private DrawingShape trackingShape = null;
+
+    @FXML private ToggleButton btnTracking;
+
+    private AtomicInteger frameCounter = new AtomicInteger(0);
+
+    @FXML public void setThicknessSmall() { updateSize(5); }
+    @FXML public void setThicknessMed() { updateSize(15); }
+    @FXML public void setThicknessLarge() { updateSize(30); }
+    @FXML public void setThicknessExtra() { updateSize(50); }
+
+    @FXML private VBox placeholderView;
+    @FXML private Region iconPlaceholder;
+
+    private double currentStrokeWidth = 15.0;
+
     // =========================================================================
     //                               INICIALIZACIÓN
     // =========================================================================
 
     public void initialize() {
+        if (btnToggleAI == null) {
+            btnToggleAI = new ToggleButton();
+        }
         videoService = new VideoService(videoView);
         aiService = new AIService();
         try {
@@ -198,7 +221,7 @@ public class EditorController {
         }
 
         if (sizeSlider != null) {
-            sizeSlider.setValue(20);
+            sizeSlider.setValue(15);
             sizeSlider.valueProperty().addListener((obs, oldVal, newVal) -> {
                 if (selectedShapeToMove != null) {
                     selectedShapeToMove.setStrokeWidth(newVal.doubleValue());
@@ -294,6 +317,28 @@ public class EditorController {
         // También asegúrate de que el scroll se actualice al arrastrar
         timelineCanvas.setOnMousePressed(this::onTimelinePressed);
         timelineCanvas.setOnMouseReleased(this::onTimelineReleased);
+
+        container.getStylesheets().add(Objects.requireNonNull(getClass().getResource("/style.css"))
+                .toExternalForm());
+
+        // Vincular icono de cámara al placeholder
+        iconPlaceholder.setShape(AppIcons.getIcon("video-camera", 40));
+
+        // ✅ LÓGICA AUTOMÁTICA: El panel solo se ve si no hay vídeo cargado
+        placeholderView.visibleProperty().bind(videoView.imageProperty().isNull());
+    }
+
+    private void updateSize(double newSize) {
+        this.currentStrokeWidth = newSize; // ✅ Actualizamos la variable de dibujo principal
+
+        if (sizeSlider != null) {
+            sizeSlider.setValue(newSize); // Mantenemos sincronizado el slider si existe
+        }
+
+        if (selectedShapeToMove != null) {
+            selectedShapeToMove.setStrokeWidth(newSize);
+            redrawVideoCanvas();
+        }
     }
 
     private void onTimelinePressed(MouseEvent e) {
@@ -390,6 +435,7 @@ public class EditorController {
         if(btnRedo != null) btnRedo.setGraphic(AppIcons.getIcon("redo", 16));
         if(btnSkipStart != null) btnSkipStart.setGraphic(AppIcons.getIcon("skipBack", 16));
         if(btnSkipEnd != null) btnSkipEnd.setGraphic(AppIcons.getIcon("skipForward", 16));
+        if(btnTracking != null) btnTracking.setGraphic(AppIcons.getIcon("tracking", 16));
     }
 
     // --- SELECTORES HERRAMIENTAS ---
@@ -406,6 +452,17 @@ public class EditorController {
     @FXML public void setToolRectShaded() { changeTool(ToolType.RECT_SHADED); }
     @FXML public void setToolZoomCircle() { changeTool(ToolType.ZOOM_CIRCLE); }
     @FXML public void setToolZoomRect() { changeTool(ToolType.ZOOM_RECT); }
+    @FXML
+    public void setToolTracking() {
+        changeTool(ToolType.TRACKING);
+        // Forzamos la activación del botón de IA si no está puesto
+        if (btnToggleAI != null && !btnToggleAI.isSelected()) {
+            btnToggleAI.setSelected(true);
+            System.out.println("DEBUG: IA activada automáticamente para Tracking.");
+        }
+
+        runAIDetectionManual();
+    }
 
     private void changeTool(ToolType type) {
         finishPolyShape();
@@ -508,6 +565,50 @@ public class EditorController {
                 return;
             }
 
+            if (currentTool == ToolType.TRACKING) {
+                System.out.println("DEBUG: Herramienta Tracking activa. Detecciones actuales: " + currentDetections.size());
+
+                if (currentDetections.isEmpty()) {
+                    runAIDetectionManual();
+                    System.out.println("⚠️ No hay detecciones. ¿Has activado el botón de IA (YOLO)?");
+                    // Opcional: mostrarAlerta("Aviso", "Activa el botón de IA para poder seguir jugadores.");
+                }
+
+                saveState();
+                double minDist = 80.0; // ✅ Aumentamos el radio para que sea más fácil acertar
+                trackedObject = null;
+
+                for (var obj : currentDetections) {
+                    if (obj.getClassName().equals("person")) {
+                        var r = obj.getBoundingBox().getBounds();
+                        double cx = (r.getX() + r.getWidth()/2.0) / 640.0 * drawCanvas.getWidth();
+                        double cy = (r.getY() + r.getHeight()/2.0) / 640.0 * drawCanvas.getHeight();
+
+                        double dist = Math.sqrt(Math.pow(e.getX() - cx, 2) + Math.pow(e.getY() - cy, 2));
+                        if (dist < minDist) {
+                            trackedObject = obj;
+                            minDist = dist;
+                        }
+                    }
+                }
+
+                if (trackedObject != null) {
+                    System.out.println("✅ Jugador enganchado: " + trackedObject.getClassName());
+                    trackingShape = new DrawingShape("track_" + System.currentTimeMillis(), "spotlight", e.getX(), e.getY(), toHex(colorPicker.getValue()));
+                    if (currentSeg != null) trackingShape.setClipId(currentSeg.getId());
+                    shapes.add(trackingShape);
+
+                    // Ponemos un EndX/EndY inicial distinto para que el dibujo sea visible antes del primer movimiento
+                    trackingShape.setEndX(e.getX());
+                    trackingShape.setEndY(e.getY() + 10);
+
+                    redrawVideoCanvas();
+                } else {
+                    System.out.println("❌ No se encontró ningún jugador cerca del clic.");
+                }
+                return; // ✅ IMPORTANTE: Este return evita que se cree el frame azul (auto-congelado)
+            }
+
             // ---------------------------------------------------------
             // AUTO-CONGELADO INTELIGENTE
             // ---------------------------------------------------------
@@ -529,7 +630,7 @@ public class EditorController {
             if (currentTool == ToolType.TEXT) { showFloatingInput(e.getX(), e.getY()); return; }
 
             Color c = colorPicker != null ? colorPicker.getValue() : Color.RED;
-            double s = sizeSlider != null ? sizeSlider.getValue() : 5;
+            double s = currentStrokeWidth;
 
             // A. CASO LÁPIZ
             if (currentTool == ToolType.PEN) {
@@ -1140,7 +1241,7 @@ public class EditorController {
 
     private void setupVideoEvents() {
         videoService.setOnProgressUpdate(percent -> {
-
+            if (System.currentTimeMillis() < ignoreUpdatesUntil) return;
             // ✅ SI ESTAMOS EN PAUSA TÁCTICA, IGNORAMOS EL VIDEO REAL
             if (isPlayingFreeze) return;
 
@@ -1149,7 +1250,6 @@ public class EditorController {
             if (totalOriginalDuration > 0) {
                 currentRealVideoTime = (percent / 100.0) * totalOriginalDuration;
 
-                // 2. ¿DÓNDE DEBERÍAMOS ESTAR SEGÚN EL TIMELINE?
                 VideoSegment expectedSeg = getCurrentSegment();
 
                 // 3. DETECCIÓN DE ENTRADA A PAUSA: Si el segmento bajo el cabezal es azul
@@ -1198,13 +1298,67 @@ public class EditorController {
 
         // Configuración de IA y Frames (se mantiene igual)
         videoService.setOnFrameCaptured(bufferedImage -> {
+            // Incrementar el contador de frames
+            int currentFrame = frameCounter.incrementAndGet();
+            // Ejemplo: Solo procesar IA cada 3 frames para no saturar
+            if (currentFrame % 2 != 0) return;
+
             if (!btnToggleAI.isSelected() || isProcessingAI.get()) return;
+
             isProcessingAI.set(true);
             aiExecutor.submit(() -> {
                 try {
                     var results = aiService.detectPlayers(bufferedImage);
                     Platform.runLater(() -> {
+                        if (!btnToggleAI.isSelected()) {
+                            this.currentDetections.clear();
+                            redrawVideoCanvas();
+                            isProcessingAI.set(false);
+                            return;
+                        }
                         this.currentDetections = results;
+
+                        // ✅ LÓGICA DE SEGUIMIENTO ACTIVO
+                        if (trackedObject != null && trackingShape != null && videoService.isPlaying()) {
+                            // Buscar en los nuevos resultados el objeto más cercano a la posición anterior del shape
+                            DetectedObjects.DetectedObject closest = null;
+                            double dMin = 100.0;
+
+                            for (var obj : results) {
+                                if (obj.getClassName().equals("person")) {
+                                    var r = obj.getBoundingBox().getBounds();
+                                    // ✅ CÁLCULO MANUAL
+                                    double rCenterX = r.getX() + (r.getWidth() / 2.0);
+                                    double rCenterY = r.getY() + (r.getHeight() / 2.0);
+
+                                    double nx = (rCenterX / 640.0) * drawCanvas.getWidth();
+                                    double ny = (rCenterY / 640.0) * drawCanvas.getHeight();
+
+                                    double d = Math.sqrt(Math.pow(trackingShape.getStartX() - nx, 2) + Math.pow(trackingShape.getStartY() - ny, 2));
+                                    if (d < dMin) {
+                                        dMin = d;
+                                        closest = obj;
+                                    }
+                                }
+                            }
+
+                            if (closest != null) {
+                                var r = closest.getBoundingBox().getBounds();
+
+                                // ✅ CÁLCULO MANUAL PARA LA BASE (Pies del jugador)
+                                double finalCenterX = r.getX() + (r.getWidth() / 2.0);
+                                double finalBottomY = r.getY() + r.getHeight();
+
+                                double newX = (finalCenterX / 640.0) * drawCanvas.getWidth();
+                                double newY = (finalBottomY / 640.0) * drawCanvas.getHeight();
+
+                                trackingShape.setStartX(newX);
+                                trackingShape.setStartY(newY - 80); // Foco un poco por encima
+                                trackingShape.setEndX(newX);
+                                trackingShape.setEndY(newY);
+                            }
+                        }
+
                         redrawVideoCanvas();
                         isProcessingAI.set(false);
                     });
@@ -1227,6 +1381,8 @@ public class EditorController {
     private void jumpToNextSegment(VideoSegment currentSeg) {
 
         autoSaveActiveSegmentDrawings();
+
+        resetTracking();
 
         int nextIndex = -1;
 
@@ -1674,10 +1830,26 @@ public class EditorController {
     }
 
     private void updateScrollbarAndRedraw() {
-        if (totalTimelineDuration <= 0) return;
+        if (totalTimelineDuration <= 0) {
+            timelineScroll.setVisible(false); // Ocultar si no hay video
+            timelineScroll.setManaged(false);
+            return;
+        }
+
         double canvasW = timelineCanvas.getWidth();
-        double totalW = totalTimelineDuration * pixelsPerSecond; timelineScroll.setMax(Math.max(0, totalW - canvasW));
-        timelineScroll.setVisibleAmount((canvasW / totalW) * timelineScroll.getMax());
+        double totalW = totalTimelineDuration * pixelsPerSecond;
+
+        // ✅ LÓGICA DE AUTO-HIDE
+        // Solo es visible si el ancho total es mayor que el ancho del canvas
+        boolean needsScroll = totalW > canvasW;
+        timelineScroll.setVisible(needsScroll);
+        timelineScroll.setManaged(needsScroll); // Para que no ocupe espacio si no se ve
+
+        if (needsScroll) {
+            timelineScroll.setMax(Math.max(0, totalW - canvasW));
+            timelineScroll.setVisibleAmount((canvasW / totalW) * timelineScroll.getMax());
+        }
+
         redrawTimeline();
     }
 
@@ -1770,7 +1942,6 @@ public class EditorController {
     }
 
     private void seekTimeline(double mouseX) {
-
         autoSaveActiveSegmentDrawings();
 
         double scrollOffset = timelineScroll.getValue();
@@ -1779,29 +1950,41 @@ public class EditorController {
         if (time < 0) time = 0;
         if (time > totalTimelineDuration) time = totalTimelineDuration;
 
+        VideoSegment oldSeg = getCurrentSegment(); // El clip donde estábamos
         currentTimelineTime = time;
 
-        // Buscamos el segmento correspondiente bajo el ratón
-        for (VideoSegment seg : segments) {
-            if (time >= seg.getStartTime() && time <= seg.getEndTime()) {
-
-                // Calculamos el punto exacto del vídeo original
-                double seekTarget = (seg.isFreezeFrame())
-                        ? seg.getSourceStartTime()
-                        : seg.getSourceStartTime() + (time - seg.getStartTime());
-
-                if (totalOriginalDuration > 0) {
-                    double percent = (seekTarget / totalOriginalDuration) * 100.0;
-                    performSafeSeek(percent); // Salto suave al vídeo
-                }
+        // 1. Buscamos el segmento de destino
+        VideoSegment targetSeg = null;
+        for (VideoSegment s : segments) {
+            if (time >= s.getStartTime() && time <= s.getEndTime()) {
+                targetSeg = s;
                 break;
             }
         }
 
-        // ✅ REFRESH CRÍTICO: Sincroniza Playhead, Tiempo y Dibujos
+        // 2. ✅ DETECTAR CAMBIO DE CLIP (Para pantalla limpia)
+        // Si el clip de destino es diferente al anterior (o saltamos a un hueco), limpiamos todo.
+        if (oldSeg != null) {
+            if (targetSeg == null || !oldSeg.getId().equals(targetSeg.getId())) {
+                resetTracking(); // Esto apagará el botón de IA y limpiará las cajas
+            }
+        }
+
+        // 3. Si hay un segmento válido, saltamos a su posición de vídeo
+        if (targetSeg != null) {
+            double seekTarget = (targetSeg.isFreezeFrame())
+                    ? targetSeg.getSourceStartTime()
+                    : targetSeg.getSourceStartTime() + (time - targetSeg.getStartTime());
+
+            if (totalOriginalDuration > 0) {
+                double percent = (seekTarget / totalOriginalDuration) * 100.0;
+                performSafeSeek(percent);
+            }
+        }
+
         checkPlaybackJump();
         redrawTimeline();
-        redrawVideoCanvas(); // Fundamental para ver el frame azul al instante
+        redrawVideoCanvas();
         updateTimeLabel();
     }
 
@@ -2541,24 +2724,34 @@ public class EditorController {
     private void initTimelineContextMenu() {
         timelineContextMenu = new ContextMenu();
 
-        MenuItem saveFrameItem = new MenuItem("💾 Guardar Análisis");
+        // ✅ NUEVO: Opción de IA Overlay
+        CheckMenuItem aiItem = new CheckMenuItem("🤖 Activar IA Overlay");
+        aiItem.setSelected(btnToggleAI.isSelected());
+        // Sincronizamos el menú con nuestro botón lógico
+        aiItem.selectedProperty().addListener((obs, oldV, newV) -> {
+            btnToggleAI.setSelected(newV);
+            redrawVideoCanvas();
+        });
+
+        MenuItem saveFrameItem = new MenuItem("Guardar");
         saveFrameItem.setOnAction(e -> onSaveFrame());
 
-        MenuItem modifyTimeItem = new MenuItem("🕒 Modificar Duración");
+        MenuItem modifyTimeItem = new MenuItem("Modificar Duración");
         modifyTimeItem.setOnAction(e -> onModifyFreezeDuration());
 
-        MenuItem captureItem = new MenuItem("📷 Capturar Frame");
+        MenuItem captureItem = new MenuItem("Capturar Frame");
         captureItem.setOnAction(e -> onCaptureFrame());
 
-        MenuItem cutItem = new MenuItem("✂ Cortar Video");
+        MenuItem cutItem = new MenuItem("Cortar");
         cutItem.setOnAction(e -> onCutVideo());
 
-        MenuItem deleteItem = new MenuItem("🗑 Borrar Segmento");
+        MenuItem deleteItem = new MenuItem("Borrar");
         deleteItem.setStyle("-fx-text-fill: #ff4444;");
         deleteItem.setOnAction(e -> onDeleteSegment());
 
         // Añadimos la nueva opción al principio
         timelineContextMenu.getItems().addAll(
+                aiItem,
                 saveFrameItem,
                 modifyTimeItem,
                 new SeparatorMenuItem(),
@@ -2639,6 +2832,71 @@ public class EditorController {
                 System.err.println("⚠️ Error en auto-save silencioso: " + e.getMessage());
             }
         }).start();
+    }
+
+    private void runAIDetectionManual() {
+        if (btnToggleAI == null || !btnToggleAI.isSelected() || isProcessingAI.get()) return;
+
+        Image fxImage = videoView.getImage();
+        if (fxImage == null) return;
+
+        isProcessingAI.set(true);
+
+        Platform.runLater(() -> {
+            if (lblStatus != null) lblStatus.setText("🔍 Analizando frame...");
+        });
+
+        aiExecutor.submit(() -> {
+            try {
+                BufferedImage bufferedImage = SwingFXUtils.fromFXImage(fxImage, null);
+                var results = aiService.detectPlayers(bufferedImage);
+
+                Platform.runLater(() -> {
+                    // Si el usuario apagó el botón mientras procesábamos, abortamos
+                    if (!btnToggleAI.isSelected()) {
+                        this.currentDetections.clear();
+                        redrawVideoCanvas();
+                        isProcessingAI.set(false);
+                        return;
+                    }
+
+                    this.currentDetections = results;
+                    redrawVideoCanvas(); // ✅ FUNDAMENTAL: Para que aparezcan las cajas
+
+                    if (lblStatus != null) lblStatus.setText("✅ Análisis listo");
+                    isProcessingAI.set(false); // ✅ LIBERAR para la siguiente detección
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> isProcessingAI.set(false));
+            }
+        });
+    }
+
+    private void resetTracking() {
+        // 1. Limpiar datos lógicos de seguimiento y detecciones
+        this.trackedObject = null;
+        this.trackingShape = null;
+        this.currentDetections.clear(); // Esto borra las cajas verdes actuales
+
+        // 2. ✅ APAGAR EL INTERRUPTOR DE LA IA
+        // Si no haces esto, el bucle de video volverá a detectar jugadores en 10ms
+        if (btnToggleAI != null) {
+            btnToggleAI.setSelected(false);
+        }
+
+        // 3. Volver a la herramienta de selección normal
+        this.currentTool = ToolType.CURSOR;
+        if (btnCursor != null) {
+            btnCursor.setSelected(true);
+        }
+
+        // 4. Limpiar mensajes de estado
+        if (lblStatus != null) lblStatus.setText("");
+
+        // 5. Refrescar el canvas para que desaparezca todo rastro visual
+        redrawVideoCanvas();
+
+        System.out.println("DEBUG: Pantalla limpia y IA desactivada por cambio de fragmento.");
     }
 
 }

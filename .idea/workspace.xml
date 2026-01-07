@@ -7,8 +7,6 @@
     <list default="true" id="4158da3a-2dc1-4b12-b50c-8b73e666fd65" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/controller/EditorController.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/controller/EditorController.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/model/DrawingShape.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/model/DrawingShape.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/model/VideoSegment.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/model/VideoSegment.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/util/AppIcons.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/util/AppIcons.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main/resources/layout.fxml" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/resources/layout.fxml" afterDir="false" />
     </list>
@@ -121,7 +119,7 @@
       <option name="presentableId" value="Default" />
       <updated>1766829029138</updated>
       <workItem from="1766829030292" duration="47205000" />
-      <workItem from="1767101433742" duration="47502000" />
+      <workItem from="1767101433742" duration="64800000" />
     </task>
     <servers />
   </component>
