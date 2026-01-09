@@ -31,7 +31,14 @@
 
 .transport-btn { -fx-background-color: transparent; -fx-text-fill: white; -fx-cursor: hand; }
 .time-label { -fx-text-fill: #7c3aed; -fx-font-family: 'Monospaced'; -fx-font-weight: bold; }
-.action-btn { -fx-background-color: #16a34a; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8; -fx-padding: 8 20; }
+.action-btn {
+    -fx-background-color: #16a34a;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+    -fx-background-radius: 8;
+    -fx-padding: 5 15;
+    -fx-cursor: hand;
+}
 
 /* --- TIMELINE (Bordes Redondeados y Sin Línea Gris) --- */
 .timeline-container {
@@ -40,10 +47,13 @@
     -fx-border-color: #222222;     /* Línea muy sutil, casi negra */
     -fx-border-radius: 15;
     -fx-border-width: 1;
-    -fx-padding: 10;
+    -fx-padding: 5;
 }
 
-.timeline-scroll { -fx-background-color: transparent; -fx-pref-height: 6px; }
+.timeline-scroll {
+    -fx-background-color: transparent;
+    -fx-pref-height: 4px;
+}
 .timeline-scroll .thumb { -fx-background-color: #444; -fx-background-radius: 10; }
 
 /* --- ESTILO PARA EL SLIDER DE ZOOM --- */
@@ -70,7 +80,7 @@
 .bottom-bar-container {
     -fx-background-color: #1e1e1e;
     -fx-background-radius: 15;
-    -fx-padding: 5 15; /* ✅ Reducido de 10 20 para que los botones queden más cerca del borde */
+    -fx-padding: 0 15; /* ✅ Reducido de 10 20 para que los botones queden más cerca del borde */
     -fx-border-color: #2a2a2a;
     -fx-border-radius: 15;
 }
@@ -135,4 +145,19 @@
     -fx-max-width: 35;
     -fx-max-height: 35;
     -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.4), 5, 0, 0, 0);
+}
+
+/* Estilo para los textos descriptivos (Zoom y Edición) */
+.control-label {
+    -fx-text-fill: #888888;
+    -fx-font-size: 14px;     /* ✅ Modifica este valor para el tamaño */
+    -fx-font-weight: bold;
+}
+
+/* Estilo para el contador de tiempo */
+.time-label {
+    -fx-text-fill: #7c3aed;
+    -fx-font-family: 'Monospaced';
+    -fx-font-weight: bold;
+    -fx-font-size: 16px;     /* ✅ Modifica este valor para el tamaño del tiempo */
 }

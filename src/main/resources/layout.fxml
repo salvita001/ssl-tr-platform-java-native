@@ -106,10 +106,13 @@
                     <children>
                         <HBox alignment="CENTER_LEFT" HBox.hgrow="ALWAYS" spacing="15">
                             <children>
-                                <Label text="Zoom Timeline:" textFill="GRAY" />
+                                <Label text="Zoom Timeline:" styleClass="control-label" />
                                 <Slider fx:id="zoomSlider" min="5" value="10" prefWidth="120" />
+
                                 <Separator orientation="VERTICAL" opacity="0.1" prefHeight="20" />
-                                <Label text="Edición: " textFill="GRAY" />
+
+                                <Label text="Edición: " styleClass="control-label" />
+
                                 <Label fx:id="lblTime" text="00:00 - 00:00" styleClass="time-label" />
                             </children>
                         </HBox>

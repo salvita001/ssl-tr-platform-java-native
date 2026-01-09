@@ -418,24 +418,24 @@ public class EditorController {
     }
 
     private void applyIcons() {
-        if(btnCursor != null) btnCursor.setGraphic(AppIcons.getIcon("cursor", 16));
-        if(btnPen != null) btnPen.setGraphic(AppIcons.getIcon("pen", 16));
-        if(btnText != null) btnText.setGraphic(AppIcons.getIcon("text", 16));
-        if(btnArrow != null) btnArrow.setGraphic(AppIcons.getIcon("arrow", 16));
-        if(btnArrowDashed != null) btnArrowDashed.setGraphic(AppIcons.getIcon("arrow-dashed", 16));
-        if(btnArrow3D != null) btnArrow3D.setGraphic(AppIcons.getIcon("arrow-3d", 16));
-        if(btnSpotlight != null) btnSpotlight.setGraphic(AppIcons.getIcon("spotlight", 16));
-        if(btnBase != null) btnBase.setGraphic(AppIcons.getIcon("base", 16));
-        if(btnWall != null) btnWall.setGraphic(AppIcons.getIcon("wall", 16));
-        if(btnPolygon != null) btnPolygon.setGraphic(AppIcons.getIcon("polygon", 16));
-        if(btnRectShaded != null) btnRectShaded.setGraphic(AppIcons.getIcon("rect-shaded", 16));
-        if(btnZoomCircle != null) btnZoomCircle.setGraphic(AppIcons.getIcon("zoom-circle", 16));
-        if(btnZoomRect != null) btnZoomRect.setGraphic(AppIcons.getIcon("zoom-rect", 16));
-        if(btnUndo != null) btnUndo.setGraphic(AppIcons.getIcon("undo", 16));
-        if(btnRedo != null) btnRedo.setGraphic(AppIcons.getIcon("redo", 16));
-        if(btnSkipStart != null) btnSkipStart.setGraphic(AppIcons.getIcon("skipBack", 16));
-        if(btnSkipEnd != null) btnSkipEnd.setGraphic(AppIcons.getIcon("skipForward", 16));
-        if(btnTracking != null) btnTracking.setGraphic(AppIcons.getIcon("tracking", 16));
+        if(btnCursor != null) btnCursor.setGraphic(AppIcons.getIcon("cursor", 20));
+        if(btnPen != null) btnPen.setGraphic(AppIcons.getIcon("pen", 20));
+        if(btnText != null) btnText.setGraphic(AppIcons.getIcon("text", 20));
+        if(btnArrow != null) btnArrow.setGraphic(AppIcons.getIcon("arrow", 20));
+        if(btnArrowDashed != null) btnArrowDashed.setGraphic(AppIcons.getIcon("arrow-dashed", 20));
+        if(btnArrow3D != null) btnArrow3D.setGraphic(AppIcons.getIcon("arrow-3d", 20));
+        if(btnSpotlight != null) btnSpotlight.setGraphic(AppIcons.getIcon("spotlight", 20));
+        if(btnBase != null) btnBase.setGraphic(AppIcons.getIcon("base", 20));
+        if(btnWall != null) btnWall.setGraphic(AppIcons.getIcon("wall", 20));
+        if(btnPolygon != null) btnPolygon.setGraphic(AppIcons.getIcon("polygon", 20));
+        if(btnRectShaded != null) btnRectShaded.setGraphic(AppIcons.getIcon("rect-shaded", 20));
+        if(btnZoomCircle != null) btnZoomCircle.setGraphic(AppIcons.getIcon("zoom-circle", 20));
+        if(btnZoomRect != null) btnZoomRect.setGraphic(AppIcons.getIcon("zoom-rect", 20));
+        if(btnUndo != null) btnUndo.setGraphic(AppIcons.getIcon("undo", 20));
+        if(btnRedo != null) btnRedo.setGraphic(AppIcons.getIcon("redo", 20));
+        if(btnSkipStart != null) btnSkipStart.setGraphic(AppIcons.getIcon("skipBack", 20));
+        if(btnSkipEnd != null) btnSkipEnd.setGraphic(AppIcons.getIcon("skipForward", 20));
+        if(btnTracking != null) btnTracking.setGraphic(AppIcons.getIcon("tracking", 20));
     }
 
     // --- SELECTORES HERRAMIENTAS ---
@@ -1880,7 +1880,7 @@ public class EditorController {
                 @Override
                 protected TreeMap<Double, Image> call() throws Exception {
                     // Intervalo de 5 segundos, altura de miniatura 100px (para aprovechar la nueva altura)
-                    return new FilmstripService().generateFilmstrip(f, 5.0, 70);
+                    return new FilmstripService().generateFilmstrip(f, 5.0, 80);
                 }
             };
 
@@ -2253,6 +2253,8 @@ public class EditorController {
         // Video
         addTooltip(btnSkipStart, "Ir al inicio");
         addTooltip(btnSkipEnd, "Ir al final");
+
+        addTooltip(btnTracking, "Tracking - Seguimiento automático de jugadores");
     }
 
     // Método auxiliar para crear el tooltip con estilo
