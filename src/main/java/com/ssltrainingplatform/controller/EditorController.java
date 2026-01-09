@@ -1367,49 +1367,25 @@ public class EditorController {
         });
     }
 
-    // --- MÉTODOS AUXILIARES ---
-
-    private void performSafeSeek(double percent) {
-        // 1. Ponemos la venda: Ignorar updates durante 1 segundo (1000ms)
-        // Esto da tiempo al video a moverse y estabilizarse
-        ignoreUpdatesUntil = System.currentTimeMillis() + 1000;
-
-        // 2. Ordenar el salto
-        videoService.seek(percent);
-    }
-
     private void jumpToNextSegment(VideoSegment currentSeg) {
-
         autoSaveActiveSegmentDrawings();
-
         resetTracking();
 
-        int nextIndex = -1;
-
-        if (currentSeg != null) {
-            nextIndex = segments.indexOf(currentSeg) + 1;
-        } else {
-            nextIndex = getNextSegmentIndexByTime();
-        }
+        int nextIndex = (currentSeg != null) ? segments.indexOf(currentSeg) + 1 : getNextSegmentIndexByTime();
 
         if (nextIndex < segments.size()) {
             VideoSegment nextSeg = segments.get(nextIndex);
-
-            System.out.println("Salto al segmento " + nextIndex);
-
-            // Actualizamos lógica
             currentTimelineTime = nextSeg.getStartTime();
 
-            // Forzamos video con seguridad
             double seekPercent = (nextSeg.getSourceStartTime() / totalOriginalDuration) * 100.0;
             performSafeSeek(seekPercent);
 
+            // ✅ IMPORTANTE: Verificar inmediatamente si el nuevo clip es un freeze
+            checkPlaybackJump();
         } else {
-            // Fin del video
             Platform.runLater(() -> {
-                onPlayPause(); // Pausar
+                if (videoService.isPlaying()) onPlayPause();
                 currentTimelineTime = totalTimelineDuration;
-                updateTimeLabel();
                 redrawTimeline();
             });
         }
@@ -1429,25 +1405,26 @@ public class EditorController {
     private void checkPlaybackJump() {
         VideoSegment currentSeg = getCurrentSegment();
 
-        if (currentSeg != null) {
-            if (currentSeg.isFreezeFrame()) {
-                // --- ACTIVAR MODO CONGELADO ---
-                if (!isPlayingFreeze) {
-                    videoService.pause();
-                    isPlayingFreeze = true;
-                    lastTimerTick = 0; // Resetear para que el timer se sincronice con el tiempo real de la CPU
-                    freezeTimer.start();
-                }
-            } else {
-                // --- VOLVER A MODO VÍDEO ---
-                if (isPlayingFreeze) {
-                    freezeTimer.stop();
-                    isPlayingFreeze = false;
+        if (currentSeg != null && currentSeg.isFreezeFrame()) {
+            if (!isPlayingFreeze) {
+                videoService.pause();
+                isPlayingFreeze = true;
+                lastTimerTick = 0;
+                freezeTimer.start();
+            }
+        } else {
+            // --- SALIR DE MODO CONGELADO ---
+            if (isPlayingFreeze) {
+                freezeTimer.stop();
+                isPlayingFreeze = false;
+            }
 
-                    // Si el botón está en modo Play (||), reanudamos la marcha real
-                    if ("||".equals(btnPlayPause.getText())) {
-                        videoService.play();
-                    }
+            // ✅ CLAVE: Si caemos en un hueco (null) y estamos en Play, saltamos al siguiente
+            if ("||".equals(btnPlayPause.getText())) {
+                if (currentSeg == null) {
+                    jumpToNextSegment(null); // Salto automático de huecos
+                } else {
+                    videoService.play();
                 }
             }
         }
@@ -1941,6 +1918,13 @@ public class EditorController {
         }
     }
 
+    // 1. Reducimos el tiempo de bloqueo de 1000ms a 150ms para que sea instantáneo
+    private void performSafeSeek(double percent) {
+        ignoreUpdatesUntil = System.currentTimeMillis() + 150; // ✅ Evita el "salto" de 1 segundo después del click
+        videoService.seek(percent);
+    }
+
+    // 2. Buscamos el punto de vídeo más cercano si haces clic en un hueco
     private void seekTimeline(double mouseX) {
         autoSaveActiveSegmentDrawings();
 
@@ -1950,10 +1934,9 @@ public class EditorController {
         if (time < 0) time = 0;
         if (time > totalTimelineDuration) time = totalTimelineDuration;
 
-        VideoSegment oldSeg = getCurrentSegment(); // El clip donde estábamos
         currentTimelineTime = time;
 
-        // 1. Buscamos el segmento de destino
+        // Buscamos el segmento donde hemos caído O el más cercano
         VideoSegment targetSeg = null;
         for (VideoSegment s : segments) {
             if (time >= s.getStartTime() && time <= s.getEndTime()) {
@@ -1962,23 +1945,17 @@ public class EditorController {
             }
         }
 
-        // 2. ✅ DETECTAR CAMBIO DE CLIP (Para pantalla limpia)
-        // Si el clip de destino es diferente al anterior (o saltamos a un hueco), limpiamos todo.
-        if (oldSeg != null) {
-            if (targetSeg == null || !oldSeg.getId().equals(targetSeg.getId())) {
-                resetTracking(); // Esto apagará el botón de IA y limpiará las cajas
-            }
-        }
-
-        // 3. Si hay un segmento válido, saltamos a su posición de vídeo
         if (targetSeg != null) {
-            double seekTarget = (targetSeg.isFreezeFrame())
-                    ? targetSeg.getSourceStartTime()
-                    : targetSeg.getSourceStartTime() + (time - targetSeg.getStartTime());
-
-            if (totalOriginalDuration > 0) {
-                double percent = (seekTarget / totalOriginalDuration) * 100.0;
-                performSafeSeek(percent);
+            double offset = time - targetSeg.getStartTime();
+            double seekTarget = targetSeg.getSourceStartTime() + offset;
+            performSafeSeek((seekTarget / totalOriginalDuration) * 100.0);
+        } else {
+            // ✅ SI CAES EN UN HUECO: Buscamos el siguiente clip para que el video no se pierda
+            for (VideoSegment s : segments) {
+                if (s.getStartTime() > time) {
+                    performSafeSeek((s.getSourceStartTime() / totalOriginalDuration) * 100.0);
+                    break;
+                }
             }
         }
 
@@ -2045,15 +2022,21 @@ public class EditorController {
     private void recalculateSegmentTimes() {
         if (segments.isEmpty()) return;
 
-        double lastEndTime = 0.0;
-        for (VideoSegment seg : segments) {
+        double currentPos = 0.0;
+        double editGap = 0.05; // ✅ El espacio de transición que quieres mantener entre cortes
+
+        for (int i = 0; i < segments.size(); i++) {
+            VideoSegment seg = segments.get(i);
             double duration = seg.getDuration();
-            seg.setStartTime(lastEndTime);
-            seg.setEndTime(lastEndTime + duration);
-            lastEndTime = seg.getEndTime();
+
+            seg.setStartTime(currentPos);
+            seg.setEndTime(currentPos + duration);
+
+            // El siguiente clip empezará después de la duración + el hueco de seguridad
+            currentPos = seg.getEndTime() + editGap;
         }
 
-        totalTimelineDuration = lastEndTime;
+        totalTimelineDuration = currentPos - editGap;
         updateScrollbarAndRedraw();
     }
 
