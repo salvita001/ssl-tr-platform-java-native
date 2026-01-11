@@ -292,6 +292,34 @@ public class EditorController {
             }
         });
 
+        // --- DENTRO DE initialize() en EditorController.java ---
+
+        timelineCanvas.setOnScroll(event -> {
+            // 1. Detectar movimiento lateral (Apple) o vertical (Rueda)
+            double delta = (event.getDeltaX() != 0) ? event.getDeltaX() : event.getDeltaY();
+
+            // 2. Sensibilidad
+            double scrollAmount = delta * 1.5;
+
+            // 3. Calcular el nuevo valor potencial
+            double currentValue = timelineScroll.getValue();
+            double newValue = currentValue - scrollAmount;
+
+            // 4. ✅ LIMITACIÓN (Clamping): No permitir menos de 0 ni más del máximo
+            double min = 0;
+            double max = timelineScroll.getMax();
+
+            if (newValue < min) newValue = min; // Evita los segundos negativos
+            if (newValue > max) newValue = max; // Evita pasarse del final del video
+
+            // 5. Aplicar el valor y consumir el evento
+            timelineScroll.setValue(newValue);
+            event.consume();
+
+            // No hace falta redibujar manualmente aquí porque el listener de
+            // timelineScroll.valueProperty() ya se encarga de llamar a redrawTimeline().
+        });
+
         // IMPORTANTE: Asegurarnos de recuperar el foco al hacer clic en el canvas
         // (Si no, si haces clic en un botón, el canvas pierde el foco y el ESC deja de ir)
         drawCanvas.addEventFilter(MouseEvent.MOUSE_PRESSED, e -> {
@@ -566,47 +594,49 @@ public class EditorController {
             }
 
             if (currentTool == ToolType.TRACKING) {
-                System.out.println("DEBUG: Herramienta Tracking activa. Detecciones actuales: " + currentDetections.size());
+                VideoSegment currentSegTrack = getCurrentSegment();
+                if (currentSegTrack == null) return; // No permitir tracking en el vacío
 
                 if (currentDetections.isEmpty()) {
                     runAIDetectionManual();
-                    System.out.println("⚠️ No hay detecciones. ¿Has activado el botón de IA (YOLO)?");
-                    // Opcional: mostrarAlerta("Aviso", "Activa el botón de IA para poder seguir jugadores.");
+                    return;
                 }
 
                 saveState();
-                double minDist = 80.0; // ✅ Aumentamos el radio para que sea más fácil acertar
+                double minDist = 100.0;
                 trackedObject = null;
+
+                Image vidImg = videoView.getImage();
+                double sc = Math.min(drawCanvas.getWidth() / vidImg.getWidth(), drawCanvas.getHeight() / vidImg.getHeight());
+                double vDW = vidImg.getWidth() * sc; double vDH = vidImg.getHeight() * sc;
+                double oX = (drawCanvas.getWidth() - vDW) / 2.0; double oY = (drawCanvas.getHeight() - vDH) / 2.0;
 
                 for (var obj : currentDetections) {
                     if (obj.getClassName().equals("person")) {
                         var r = obj.getBoundingBox().getBounds();
-                        double cx = (r.getX() + r.getWidth()/2.0) / 640.0 * drawCanvas.getWidth();
-                        double cy = (r.getY() + r.getHeight()/2.0) / 640.0 * drawCanvas.getHeight();
+                        double cx = ((r.getX() + r.getWidth()/2.0) / 640.0) * vDW + oX;
+                        double cy = ((r.getY() + r.getHeight()) / 640.0) * vDH + oY;
 
                         double dist = Math.sqrt(Math.pow(e.getX() - cx, 2) + Math.pow(e.getY() - cy, 2));
-                        if (dist < minDist) {
-                            trackedObject = obj;
-                            minDist = dist;
-                        }
+                        if (dist < minDist) { trackedObject = obj; minDist = dist; }
                     }
                 }
 
                 if (trackedObject != null) {
-                    System.out.println("✅ Jugador enganchado: " + trackedObject.getClassName());
-                    trackingShape = new DrawingShape("track_" + System.currentTimeMillis(), "spotlight", e.getX(), e.getY(), toHex(colorPicker.getValue()));
-                    if (currentSeg != null) trackingShape.setClipId(currentSeg.getId());
+                    var r = trackedObject.getBoundingBox().getBounds();
+                    double cX = ((r.getX() + r.getWidth()/2.0) / 640.0) * vDW + oX;
+                    double headY = (r.getY() / 640.0) * vDH + oY;
+                    double footY = ((r.getY() + r.getHeight()) / 640.0) * vDH + oY;
+
+                    trackingShape = new DrawingShape("track_" + System.currentTimeMillis(), "tracking", cX, headY, toHex(colorPicker.getValue()));
+                    trackingShape.setEndX(cX);
+                    trackingShape.setEndY(footY);
+                    trackingShape.setClipId(currentSegTrack.getId()); // ✅ BLOQUEO AL SEGMENTO
+
                     shapes.add(trackingShape);
-
-                    // Ponemos un EndX/EndY inicial distinto para que el dibujo sea visible antes del primer movimiento
-                    trackingShape.setEndX(e.getX());
-                    trackingShape.setEndY(e.getY() + 10);
-
                     redrawVideoCanvas();
-                } else {
-                    System.out.println("❌ No se encontró ningún jugador cerca del clic.");
                 }
-                return; // ✅ IMPORTANTE: Este return evita que se cree el frame azul (auto-congelado)
+                return;
             }
 
             // ---------------------------------------------------------
@@ -849,20 +879,17 @@ public class EditorController {
         // Dibujar el fondo (foto o video)
         gcDraw.drawImage(vidImg, offX, offY, vidDispW, vidDispH);
 
-        final double AI_INPUT_SIZE = 640.0;
-
-        // IA
-        if (btnToggleAI.isSelected() && currentDetections != null && vidImg != null) {
-            gcDraw.setLineWidth(2);
+        // ✅ IA: Solo dibujamos los cuadros de detección si la herramienta de Tracking está activa
+        if (btnToggleAI.isSelected() && currentTool == ToolType.TRACKING && !videoService.isPlaying() && currentDetections != null) {
+            gcDraw.setLineWidth(1.5);
             for (var obj : currentDetections) {
-                if (obj.getClassName().equals("person") || obj.getClassName().equals("sports ball")) {
+                if (obj.getClassName().equals("person")) {
                     var r = obj.getBoundingBox().getBounds();
-                    double x = (r.getX() / AI_INPUT_SIZE) * vidDispW + offX;
-                    double y = (r.getY() / AI_INPUT_SIZE) * vidDispH + offY;
-                    double w = (r.getWidth() / AI_INPUT_SIZE) * vidDispW;
-                    double h = (r.getHeight() / AI_INPUT_SIZE) * vidDispH;
-                    Color boxColor = obj.getClassName().equals("sports ball") ? Color.ORANGE : Color.LIMEGREEN;
-                    gcDraw.setStroke(boxColor); gcDraw.strokeRect(x, y, w, h);
+                    double x = (r.getX() / 640.0) * vidDispW + offX;
+                    double y = (r.getY() / 640.0) * vidDispH + offY;
+                    double w = (r.getWidth() / 640.0) * vidDispW;
+                    double h = (r.getHeight() / 640.0) * vidDispH;
+                    gcDraw.setStroke(Color.LIMEGREEN); gcDraw.strokeRect(x, y, w, h);
                 }
             }
         }
@@ -1008,6 +1035,21 @@ public class EditorController {
                         gcDraw.fillText(s.getTextValue(), x1, y1);
                     }
                     break;
+                case "tracking":
+                    // 1. Triángulo en la cabeza (StartX/Y)
+                    double triSize = 14;
+                    gcDraw.setFill(c);
+                    double[] xPts = { x1, x1 - triSize/2, x1 + triSize/2 };
+                    double[] yPts = { y1 - 5, y1 - 20, y1 - 20 }; // Punta hacia abajo
+                    gcDraw.fillPolygon(xPts, yPts, 3);
+
+                    // 2. Base circular en los pies (EndX/Y)
+                    double radius = 25.0;
+                    gcDraw.setStroke(c); gcDraw.setLineWidth(2);
+                    gcDraw.strokeOval(x2 - radius, y2 - (radius * 0.4), radius * 2, radius * 0.8);
+                    gcDraw.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.25));
+                    gcDraw.fillOval(x2 - radius, y2 - (radius * 0.4), radius * 2, radius * 0.8);
+                    break;
                 default:
                     gcDraw.setStroke(c); gcDraw.setLineWidth(3);
                     gcDraw.strokeRect(Math.min(x1,x2), Math.min(y1,y2), Math.abs(x2-x1), Math.abs(y2-y1));
@@ -1096,10 +1138,9 @@ public class EditorController {
         gcDraw.setEffect(new javafx.scene.effect.DropShadow(10, Color.BLACK));
         if (circle) {
             gcDraw.strokeOval(left, top, w, h);
-            if(w < 150) {
-                double cx = left + w*0.85; double cy = top + h*0.85; gcDraw.setLineWidth(6); gcDraw.strokeLine(cx, cy, cx+20, cy+20);
-            }
-        } else { gcDraw.strokeRect(left, top, w, h); }
+        } else {
+            gcDraw.strokeRect(left, top, w, h);
+        }
         gcDraw.setEffect(null);
     }
 
@@ -1309,67 +1350,75 @@ public class EditorController {
             aiExecutor.submit(() -> {
                 try {
                     var results = aiService.detectPlayers(bufferedImage);
-                    Platform.runLater(() -> {
-                        if (!btnToggleAI.isSelected()) {
-                            this.currentDetections.clear();
-                            redrawVideoCanvas();
-                            isProcessingAI.set(false);
-                            return;
-                        }
-                        this.currentDetections = results;
 
-                        // ✅ LÓGICA DE SEGUIMIENTO ACTIVO
-                        if (trackedObject != null && trackingShape != null && videoService.isPlaying()) {
-                            // Buscar en los nuevos resultados el objeto más cercano a la posición anterior del shape
+                    Platform.runLater(() -> {
+                        this.currentDetections = results;
+                        VideoSegment activeSeg = getCurrentSegment();
+
+                        // 1. RE-CONEXIÓN AUTOMÁTICA
+                        // Si no hay tracking activo pero estamos en "Play", buscamos si este clip ya tiene un tracking guardado
+                        if (trackingShape == null && activeSeg != null && videoService.isPlaying()) {
+                            for (DrawingShape s : shapes) {
+                                if ("tracking".equals(s.getType()) && activeSeg.getId().equals(s.getClipId())) {
+                                    trackingShape = s; // ✅ Re-enganchamos el seguimiento
+                                    break;
+                                }
+                            }
+                        }
+
+                        // 2. ACTUALIZACIÓN DE POSICIÓN
+                        if (trackingShape != null && videoService.isPlaying()) {
+                            // ✅ SEGURIDAD: Si el cabezal sale del clip del tracking, dejamos de seguir
+                            if (activeSeg == null || !activeSeg.getId().equals(trackingShape.getClipId())) {
+                                trackingShape = null;
+                                return;
+                            }
+
+                            Image img = videoView.getImage();
+                            if (img == null) return;
+
+                            // Cálculo de escala y márgenes para precisión milimétrica
+                            double sc = Math.min(drawCanvas.getWidth() / img.getWidth(), drawCanvas.getHeight() / img.getHeight());
+                            double vDW = img.getWidth() * sc; double vDH = img.getHeight() * sc;
+                            double oX = (drawCanvas.getWidth() - vDW) / 2.0; double oY = (drawCanvas.getHeight() - vDH) / 2.0;
+
                             DetectedObjects.DetectedObject closest = null;
-                            double dMin = 100.0;
+                            double dMin = 120.0;
 
                             for (var obj : results) {
                                 if (obj.getClassName().equals("person")) {
                                     var r = obj.getBoundingBox().getBounds();
-                                    // ✅ CÁLCULO MANUAL
-                                    double rCenterX = r.getX() + (r.getWidth() / 2.0);
-                                    double rCenterY = r.getY() + (r.getHeight() / 2.0);
+                                    // Coordenadas reales mapeadas al video
+                                    double nx = ((r.getX() + r.getWidth()/2.0) / 640.0) * vDW + oX;
+                                    double ny = ((r.getY() + r.getHeight()) / 640.0) * vDH + oY;
 
-                                    double nx = (rCenterX / 640.0) * drawCanvas.getWidth();
-                                    double ny = (rCenterY / 640.0) * drawCanvas.getHeight();
-
-                                    double d = Math.sqrt(Math.pow(trackingShape.getStartX() - nx, 2) + Math.pow(trackingShape.getStartY() - ny, 2));
-                                    if (d < dMin) {
-                                        dMin = d;
-                                        closest = obj;
-                                    }
+                                    double d = Math.sqrt(Math.pow(trackingShape.getEndX() - nx, 2) + Math.pow(trackingShape.getEndY() - ny, 2));
+                                    if (d < dMin) { dMin = d; closest = obj; }
                                 }
                             }
 
                             if (closest != null) {
                                 var r = closest.getBoundingBox().getBounds();
-
-                                // ✅ CÁLCULO MANUAL PARA LA BASE (Pies del jugador)
-                                double finalCenterX = r.getX() + (r.getWidth() / 2.0);
-                                double finalBottomY = r.getY() + r.getHeight();
-
-                                double newX = (finalCenterX / 640.0) * drawCanvas.getWidth();
-                                double newY = (finalBottomY / 640.0) * drawCanvas.getHeight();
-
-                                trackingShape.setStartX(newX);
-                                trackingShape.setStartY(newY - 80); // Foco un poco por encima
-                                trackingShape.setEndX(newX);
-                                trackingShape.setEndY(newY);
+                                double cX = ((r.getX() + r.getWidth()/2.0) / 640.0) * vDW + oX;
+                                // StartY = Cabeza (Triángulo), EndY = Pies (Base)
+                                trackingShape.setStartX(cX);
+                                trackingShape.setStartY((r.getY() / 640.0) * vDH + oY);
+                                trackingShape.setEndX(cX);
+                                trackingShape.setEndY(((r.getY() + r.getHeight()) / 640.0) * vDH + oY);
                             }
                         }
-
                         redrawVideoCanvas();
                         isProcessingAI.set(false);
                     });
+
                 } catch (Exception e) { isProcessingAI.set(false); }
             });
         });
     }
 
     private void jumpToNextSegment(VideoSegment currentSeg) {
-        autoSaveActiveSegmentDrawings();
         resetTracking();
+        autoSaveActiveSegmentDrawings();
 
         int nextIndex = (currentSeg != null) ? segments.indexOf(currentSeg) + 1 : getNextSegmentIndexByTime();
 
@@ -1926,6 +1975,8 @@ public class EditorController {
 
     // 2. Buscamos el punto de vídeo más cercano si haces clic en un hueco
     private void seekTimeline(double mouseX) {
+        resetTracking();
+
         autoSaveActiveSegmentDrawings();
 
         double scrollOffset = timelineScroll.getValue();
@@ -2858,30 +2909,15 @@ public class EditorController {
     }
 
     private void resetTracking() {
-        // 1. Limpiar datos lógicos de seguimiento y detecciones
         this.trackedObject = null;
-        this.trackingShape = null;
-        this.currentDetections.clear(); // Esto borra las cajas verdes actuales
+        this.trackingShape = null; // ✅ Soltamos el seguimiento activo, pero el objeto queda en 'shapes'
+        this.currentDetections.clear();
 
-        // 2. ✅ APAGAR EL INTERRUPTOR DE LA IA
-        // Si no haces esto, el bucle de video volverá a detectar jugadores en 10ms
-        if (btnToggleAI != null) {
-            btnToggleAI.setSelected(false);
-        }
-
-        // 3. Volver a la herramienta de selección normal
+        if (btnToggleAI != null) btnToggleAI.setSelected(false);
         this.currentTool = ToolType.CURSOR;
-        if (btnCursor != null) {
-            btnCursor.setSelected(true);
-        }
+        if (btnCursor != null) btnCursor.setSelected(true);
 
-        // 4. Limpiar mensajes de estado
-        if (lblStatus != null) lblStatus.setText("");
-
-        // 5. Refrescar el canvas para que desaparezca todo rastro visual
         redrawVideoCanvas();
-
-        System.out.println("DEBUG: Pantalla limpia y IA desactivada por cambio de fragmento.");
     }
 
 }

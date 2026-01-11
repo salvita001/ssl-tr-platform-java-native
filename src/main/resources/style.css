@@ -7,7 +7,7 @@
     -fx-background-radius: 15;
     -fx-padding: 15;
     -fx-border-color: #2a2a2a;
-    -fx-border-radius: 15;
+    -fx-border-radius: 10;
 }
 
 .sidebar-label { -fx-text-fill: #666; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 5 0; }
@@ -26,10 +26,31 @@
     -fx-background-radius: 15;
     -fx-padding: 10 20;
     -fx-border-color: #2a2a2a;
-    -fx-border-radius: 15;
+    -fx-border-radius: 10;
 }
 
-.transport-btn { -fx-background-color: transparent; -fx-text-fill: white; -fx-cursor: hand; }
+/* Botón Play central sin círculo morado */
+.play-btn-main {
+    -fx-background-color: transparent; /* ✅ Quitamos el fondo */
+    -fx-text-fill: #7c3aed;            /* ✅ El icono "▶" ahora es el que lleva el color */
+    -fx-font-size: 22px;               /* Un poco más grande para que se vea bien */
+    -fx-font-weight: bold;
+    -fx-cursor: hand;
+    -fx-padding: 5;                    /* Eliminamos márgenes internos */
+}
+
+/* Efecto al pasar el ratón: solo cambia el color del icono */
+.play-btn-main:hover {
+    -fx-text-fill: #8b5cf6;
+    -fx-scale-x: 1.1;
+    -fx-scale-y: 1.1;
+}
+
+.transport-btn {
+    -fx-background-color: transparent;
+    -fx-text-fill: white;
+    -fx-cursor: hand;
+}
 .time-label { -fx-text-fill: #7c3aed; -fx-font-family: 'Monospaced'; -fx-font-weight: bold; }
 .action-btn {
     -fx-background-color: #16a34a;
@@ -45,9 +66,10 @@
     -fx-background-color: #111111;
     -fx-background-radius: 15;     /* Bordes redondeados */
     -fx-border-color: #222222;     /* Línea muy sutil, casi negra */
-    -fx-border-radius: 15;
+    -fx-border-radius: 10;
     -fx-border-width: 1;
     -fx-padding: 5;
+    -fx-cursor: h-resize;
 }
 
 .timeline-scroll {
@@ -82,7 +104,8 @@
     -fx-background-radius: 15;
     -fx-padding: 0 15; /* ✅ Reducido de 10 20 para que los botones queden más cerca del borde */
     -fx-border-color: #2a2a2a;
-    -fx-border-radius: 15;
+    -fx-border-radius: 10;
+    -fx-alignment: CENTER;
 }
 
 /* --- SELECTOR DE GROSOR (Círculos Perfectos) --- */
@@ -160,4 +183,16 @@
     -fx-font-family: 'Monospaced';
     -fx-font-weight: bold;
     -fx-font-size: 16px;     /* ✅ Modifica este valor para el tamaño del tiempo */
+}
+
+/* Estilo para el separador vertical corto */
+.custom-separator {
+    -fx-padding: 8 0 8 0; /* ✅ 8px de espacio arriba y abajo */
+    -fx-opacity: 0.1;      /* Lo hacemos más sutil */
+}
+
+/* Ajustamos el grosor de la línea interna del separador */
+.custom-separator .line {
+    -fx-border-color: #ffffff;
+    -fx-border-width: 0 1 0 0; /* Solo una línea fina a la derecha */
 }
