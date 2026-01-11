@@ -55,6 +55,9 @@ public class AppIcons {
             case "skipBack" -> "M6 6h2v12H6zm3.5 6l8.5 6V6z";
             case "skipForward" -> "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z";
             case "video-camera" -> "M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z";
+            // --- FILA 8: Borrado (Nuevos) ---
+            case "trash" -> "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"; // Papelera
+            case "clear" -> "M15 16h4v2h-4v-2zm0-8h4v2h-4V8zm0 4h4v2h-4v-2zM3 18c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V8H3v10zM14 5h-3l-1-1H6l-1 1H2v2h12V5z"; // Escoba/Limpiar todo
 
             default -> "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"; // Signo de interrogación por defecto
         };

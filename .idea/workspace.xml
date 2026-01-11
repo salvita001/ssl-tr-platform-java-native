@@ -7,6 +7,7 @@
     <list default="true" id="4158da3a-2dc1-4b12-b50c-8b73e666fd65" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/controller/EditorController.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/controller/EditorController.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/util/AppIcons.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/util/AppIcons.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main/resources/layout.fxml" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/resources/layout.fxml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main/resources/style.css" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/resources/style.css" afterDir="false" />
     </list>
@@ -24,6 +25,9 @@
   </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="HighlightingSettingsPerFile">
+    <setting file="file://$PROJECT_DIR$/src/main/resources/layout.fxml" root0="SKIP_INSPECTION" />
   </component>
   <component name="MarkdownSettingsMigration">
     <option name="stateVersion" value="1" />
@@ -120,7 +124,7 @@
       <updated>1766829029138</updated>
       <workItem from="1766829030292" duration="47205000" />
       <workItem from="1767101433742" duration="76760000" />
-      <workItem from="1767984791158" duration="7413000" />
+      <workItem from="1767984791158" duration="11841000" />
     </task>
     <servers />
   </component>

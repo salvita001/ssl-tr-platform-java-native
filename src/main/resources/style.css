@@ -51,14 +51,10 @@
     -fx-text-fill: white;
     -fx-cursor: hand;
 }
-.time-label { -fx-text-fill: #7c3aed; -fx-font-family: 'Monospaced'; -fx-font-weight: bold; }
-.action-btn {
-    -fx-background-color: #16a34a;
-    -fx-text-fill: white;
+.time-label {
+    -fx-text-fill: #7c3aed;
+    -fx-font-family: 'Monospaced';
     -fx-font-weight: bold;
-    -fx-background-radius: 8;
-    -fx-padding: 5 15;
-    -fx-cursor: hand;
 }
 
 /* --- TIMELINE (Bordes Redondeados y Sin Línea Gris) --- */
@@ -187,12 +183,76 @@
 
 /* Estilo para el separador vertical corto */
 .custom-separator {
-    -fx-padding: 8 0 8 0; /* ✅ 8px de espacio arriba y abajo */
-    -fx-opacity: 0.1;      /* Lo hacemos más sutil */
+    -fx-padding: 10 5;
+    -fx-opacity: 0.1;
 }
 
 /* Ajustamos el grosor de la línea interna del separador */
 .custom-separator .line {
     -fx-border-color: #ffffff;
     -fx-border-width: 0 1 0 0; /* Solo una línea fina a la derecha */
+}
+
+/* Botón Cerrar con texto rojo */
+.tool-btn-secondary {
+    -fx-background-color: #2a2a2a;
+    -fx-text-fill: #ef4444; /* Rojo para el texto */
+    -fx-font-weight: bold;
+    -fx-padding: 8 16;      /* Aumentamos el ancho para el texto */
+    -fx-background-radius: 5;
+    -fx-cursor: hand;
+}
+
+.tool-btn-secondary:hover {
+    -fx-background-color: #3f3f3f;
+    -fx-text-fill: #ff6b6b; /* Un rojo más brillante al pasar el ratón */
+}
+
+/* El botón Exportar se mantiene igual para contraste */
+.action-btn {
+    -fx-background-color: #7c3aed;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+    -fx-padding: 8 16;
+    -fx-background-radius: 5;
+    -fx-cursor: hand;
+}
+
+.action-btn:hover {
+    -fx-background-color: #8b5cf6;
+}
+
+.status-label-small {
+    -fx-text-fill: #555555; /* Gris discreto */
+    -fx-font-size: 10px;
+    -fx-font-style: italic;
+    -fx-padding: 0 0 0 10; /* Margen a la izquierda */
+}
+
+/* Botones de borrado (Rojo sutil) */
+.tool-btn-danger {
+    -fx-background-color: #2a2a2a;
+    -fx-padding: 8;
+    -fx-background-radius: 5;
+    -fx-cursor: hand;
+}
+
+.tool-btn-danger:hover {
+    -fx-background-color: #451a1a; /* Fondo rojizo al pasar el ratón */
+}
+
+/* Icono: Papelera con X (Borrar Seleccionado) */
+.icon-delete-selected {
+    -fx-shape: "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z";
+    -fx-background-color: #ef4444;
+    -fx-min-width: 16;
+    -fx-min-height: 16;
+}
+
+/* Icono: Escoba o ráfaga (Borrar Todo) */
+.icon-clear-all {
+    -fx-shape: "M5 13h14v-2H5v2zm-2 4h14v-2H3v2zM7 7v2h14V7H7z";
+    -fx-background-color: #ef4444;
+    -fx-min-width: 16;
+    -fx-min-height: 16;
 }

@@ -176,6 +176,9 @@ public class EditorController {
 
     private double currentStrokeWidth = 15.0;
 
+    @FXML private ToggleButton btnDeleteShape;
+    @FXML private ToggleButton btnClearCanvas;
+
     // =========================================================================
     //                               INICIALIZACIÓN
     // =========================================================================
@@ -464,10 +467,16 @@ public class EditorController {
         if(btnSkipStart != null) btnSkipStart.setGraphic(AppIcons.getIcon("skipBack", 20));
         if(btnSkipEnd != null) btnSkipEnd.setGraphic(AppIcons.getIcon("skipForward", 20));
         if(btnTracking != null) btnTracking.setGraphic(AppIcons.getIcon("tracking", 20));
+        if(btnDeleteShape != null) btnDeleteShape.setGraphic(AppIcons.getIcon("trash", 20));
+        if(btnClearCanvas != null) btnClearCanvas.setGraphic(AppIcons.getIcon("clear", 20));
     }
 
     // --- SELECTORES HERRAMIENTAS ---
-    @FXML public void setToolCursor() { changeTool(ToolType.CURSOR); }
+    @FXML
+    public void setToolCursor() {
+        if (btnCursor != null) btnCursor.setSelected(true);
+        changeTool(ToolType.CURSOR);
+    }
     @FXML public void setToolPen() { changeTool(ToolType.PEN); }
     @FXML public void setToolText() { changeTool(ToolType.TEXT); }
     @FXML public void setToolArrow() { changeTool(ToolType.ARROW); }
@@ -2306,6 +2315,9 @@ public class EditorController {
         addTooltip(btnSkipEnd, "Ir al final");
 
         addTooltip(btnTracking, "Tracking - Seguimiento automático de jugadores");
+
+        addTooltip(btnDeleteShape, "Borrar edición");
+        addTooltip(btnClearCanvas, "Limpiar dibujo");
     }
 
     // Método auxiliar para crear el tooltip con estilo
@@ -2760,15 +2772,6 @@ public class EditorController {
     private void initTimelineContextMenu() {
         timelineContextMenu = new ContextMenu();
 
-        // ✅ NUEVO: Opción de IA Overlay
-        CheckMenuItem aiItem = new CheckMenuItem("🤖 Activar IA Overlay");
-        aiItem.setSelected(btnToggleAI.isSelected());
-        // Sincronizamos el menú con nuestro botón lógico
-        aiItem.selectedProperty().addListener((obs, oldV, newV) -> {
-            btnToggleAI.setSelected(newV);
-            redrawVideoCanvas();
-        });
-
         MenuItem saveFrameItem = new MenuItem("Guardar");
         saveFrameItem.setOnAction(e -> onSaveFrame());
 
@@ -2787,7 +2790,6 @@ public class EditorController {
 
         // Añadimos la nueva opción al principio
         timelineContextMenu.getItems().addAll(
-                aiItem,
                 saveFrameItem,
                 modifyTimeItem,
                 new SeparatorMenuItem(),
@@ -2919,6 +2921,100 @@ public class EditorController {
 
         redrawVideoCanvas();
     }
+
+    @FXML
+    public void onCloseVideo() {
+        // 1. Detener reproducción y hilos
+        if (videoService != null) videoService.pause();
+        if (isPlayingFreeze) {
+            freezeTimer.stop();
+            isPlayingFreeze = false;
+        }
+
+        // 2. Limpiar DATOS (Listas y Mapas)
+        segments.clear();
+        shapes.clear();
+        annotationsCache.clear();
+        filmstripMap.clear();
+
+        // 3. Resetear VARIABLES de estado
+        currentTimelineTime = 0.0;
+        totalTimelineDuration = 0.0;
+        serverVideoId = null;
+        selectedSegment = null;
+        selectedShapeToMove = null;
+
+        // 4. LIMPIEZA VISUAL FORZADA (Evita que la imagen se quede "debajo" del icono)
+        videoView.setImage(null); // Esto activa el icono de la cámara
+
+        // Limpiar el Canvas de dibujo (donde se ven las marcas y el último frame)
+        gcDraw.clearRect(0, 0, drawCanvas.getWidth(), drawCanvas.getHeight());
+
+        // Limpiar el Canvas del Timeline (donde se ven los clips)
+        gcTimeline.clearRect(0, 0, timelineCanvas.getWidth(), timelineCanvas.getHeight());
+
+        // 5. Resetear el Scrollbar para que vuelva al inicio
+        timelineScroll.setValue(0);
+        timelineScroll.setMax(0);
+        timelineScroll.setVisible(false);
+
+        // 6. Refrescar la UI
+        updateTimeLabel();
+        if (lblStatus != null) {
+            lblStatus.setText("Proyecto cerrado");
+        }
+
+        System.out.println("✅ Limpieza total completada.");
+    }
+
+    @FXML
+    public void onDeleteSelectedShape() {
+        if (selectedShapeToMove != null) {
+            saveState(); // ✅ Permite deshacer el borrado
+
+            // 1. Eliminar de la lista de dibujos activos
+            shapes.remove(selectedShapeToMove);
+
+            // 2. Eliminar de la caché del segmento actual
+            VideoSegment activeSeg = getCurrentSegment();
+            if (activeSeg != null && annotationsCache.containsKey(activeSeg.getId())) {
+                annotationsCache.get(activeSeg.getId()).remove(selectedShapeToMove);
+            }
+
+            selectedShapeToMove = null;
+            redrawVideoCanvas();
+        }
+
+        // Al ser una acción instantánea, devolvemos el foco al cursor
+        setToolCursor();
+    }
+
+    @FXML
+    public void onClearAllShapes() {
+        VideoSegment activeSeg = getCurrentSegment();
+        // Si no hay nada que borrar, no hacemos nada
+        if (shapes.isEmpty() && (activeSeg == null || !annotationsCache.containsKey(activeSeg.getId()))) {
+            setToolCursor();
+            return;
+        }
+
+        saveState(); // ✅ Registra el estado antes de limpiar todo
+
+        // 1. Limpiar dibujos en vivo
+        shapes.clear();
+
+        // 2. Limpiar dibujos guardados en este clip
+        if (activeSeg != null) {
+            annotationsCache.remove(activeSeg.getId());
+        }
+
+        selectedShapeToMove = null;
+        redrawVideoCanvas();
+
+        // Devolvemos el foco al cursor
+        setToolCursor();
+    }
+
 
 }
 
