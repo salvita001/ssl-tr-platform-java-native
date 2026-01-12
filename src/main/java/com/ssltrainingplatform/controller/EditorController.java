@@ -179,6 +179,8 @@ public class EditorController {
     @FXML private ToggleButton btnDeleteShape;
     @FXML private ToggleButton btnClearCanvas;
 
+    private double hoverTime = -1;
+
     // =========================================================================
     //                               INICIALIZACIÓN
     // =========================================================================
@@ -357,6 +359,31 @@ public class EditorController {
 
         // ✅ LÓGICA AUTOMÁTICA: El panel solo se ve si no hay vídeo cargado
         placeholderView.visibleProperty().bind(videoView.imageProperty().isNull());
+
+        timelineCanvas.setOnMouseMoved(e -> {
+            double topMargin = 22;
+            double scrollOffset = timelineScroll.getValue();
+
+            // 1. Calculamos el tiempo bajo el ratón para el tooltip
+            if (e.getY() < topMargin) {
+                hoverTime = (e.getX() + scrollOffset) / pixelsPerSecond;
+                // 2. ✅ LÓGICA DE LIVE PREVIEW (SCRUBBING)
+                long now = System.currentTimeMillis();
+                // Throttling: Solo actualizamos el vídeo cada 30ms para fluidez
+                if (now - lastScrubTime > 30) {
+                    seekTimeline(e.getX());
+                    lastScrubTime = now;
+                }
+            } else {
+                hoverTime = -1;
+            }
+            redrawTimeline();
+        });
+
+        timelineCanvas.setOnMouseExited(e -> {
+            hoverTime = -1;
+            redrawTimeline();
+        });
     }
 
     private void updateSize(double newSize) {
@@ -453,12 +480,12 @@ public class EditorController {
         if(btnPen != null) btnPen.setGraphic(AppIcons.getIcon("pen", 20));
         if(btnText != null) btnText.setGraphic(AppIcons.getIcon("text", 20));
         if(btnArrow != null) btnArrow.setGraphic(AppIcons.getIcon("arrow", 20));
-        if(btnArrowDashed != null) btnArrowDashed.setGraphic(AppIcons.getIcon("arrow-dashed", 20));
+        if(btnArrowDashed != null) btnArrowDashed.setGraphic(AppIcons.getIcon("arrow-dashed", 26));
         if(btnArrow3D != null) btnArrow3D.setGraphic(AppIcons.getIcon("arrow-3d", 20));
-        if(btnSpotlight != null) btnSpotlight.setGraphic(AppIcons.getIcon("spotlight", 20));
+        if(btnSpotlight != null) btnSpotlight.setGraphic(AppIcons.getIcon("spotlight", 30));
         if(btnBase != null) btnBase.setGraphic(AppIcons.getIcon("base", 20));
-        if(btnWall != null) btnWall.setGraphic(AppIcons.getIcon("wall", 20));
-        if(btnPolygon != null) btnPolygon.setGraphic(AppIcons.getIcon("polygon", 20));
+        if(btnWall != null) btnWall.setGraphic(AppIcons.getIcon("wall", 30));
+        if(btnPolygon != null) btnPolygon.setGraphic(AppIcons.getIcon("polygon", 30));
         if(btnRectShaded != null) btnRectShaded.setGraphic(AppIcons.getIcon("rect-shaded", 20));
         if(btnZoomCircle != null) btnZoomCircle.setGraphic(AppIcons.getIcon("zoom-circle", 20));
         if(btnZoomRect != null) btnZoomRect.setGraphic(AppIcons.getIcon("zoom-rect", 20));
@@ -468,7 +495,7 @@ public class EditorController {
         if(btnSkipEnd != null) btnSkipEnd.setGraphic(AppIcons.getIcon("skipForward", 20));
         if(btnTracking != null) btnTracking.setGraphic(AppIcons.getIcon("tracking", 20));
         if(btnDeleteShape != null) btnDeleteShape.setGraphic(AppIcons.getIcon("trash", 20));
-        if(btnClearCanvas != null) btnClearCanvas.setGraphic(AppIcons.getIcon("clear", 20));
+        if(btnClearCanvas != null) btnClearCanvas.setGraphic(AppIcons.getIcon("clear", 26));
     }
 
     // --- SELECTORES HERRAMIENTAS ---
@@ -1703,6 +1730,41 @@ public class EditorController {
 
         // 5. DIBUJAR REGLA Y CABEZAL
         drawRulerAndPlayhead(w, h, scrollOffset);
+
+        if (hoverTime >= 0 && hoverTime <= totalTimelineDuration) {
+            double hX = (hoverTime * pixelsPerSecond) - scrollOffset;
+
+            // 1. Dibujar la línea vertical tenue
+            gcTimeline.setStroke(Color.web("#ffffff", 0.4));
+            gcTimeline.setLineWidth(1.0);
+            gcTimeline.strokeLine(hX, 0, hX, h);
+
+            // 2. Dibujar el Tooltip (Recuadro flotante)
+            String timeText = formatPreciseTime(hoverTime);
+
+            // Configuración del texto para medirlo
+            gcTimeline.setFont(Font.font("Arial", FontWeight.BOLD, 10));
+            javafx.scene.text.Text temp = new javafx.scene.text.Text(timeText);
+            temp.setFont(gcTimeline.getFont());
+            double txtW = temp.getLayoutBounds().getWidth();
+
+            double rectW = txtW + 10;
+            double rectH = 16;
+            double rectX = hX - (rectW / 2);
+            double rectY = 12; // Justo debajo de la regla de números
+
+            // Fondo del recuadro (Negro redondeado)
+            gcTimeline.setFill(Color.web("#1a1a1a", 0.9));
+            gcTimeline.fillRoundRect(rectX, rectY, rectW, rectH, 5, 5);
+
+            // Borde fino para que resalte
+            gcTimeline.setStroke(Color.web("#ffffff", 0.2));
+            gcTimeline.strokeRoundRect(rectX, rectY, rectW, rectH, 5, 5);
+
+            // Texto del tiempo
+            gcTimeline.setFill(Color.WHITE);
+            gcTimeline.fillText(timeText, rectX + 5, rectY + 12);
+        }
     }
 
     private void drawStyledClip(GraphicsContext gc, VideoSegment seg, double x, double y, double w, double h, double alpha) {
@@ -1811,55 +1873,72 @@ public class EditorController {
         gc.restore(); // Restaurar estado inicial del save() principal
     }
 
+    // EditorController.java -> Sustituye tu método por esta versión refinada
     private void drawRulerAndPlayhead(double w, double h, double scrollOffset) {
-        // 5. REGLA DE TIEMPO (Copiado de tu código)
         int stepTime = (pixelsPerSecond > 80) ? 1 : (pixelsPerSecond > 40) ? 5 : (pixelsPerSecond > 20) ? 10 : 30;
         int startSec = ((int) (scrollOffset / pixelsPerSecond) / stepTime) * stepTime;
         int endSec = (int) ((scrollOffset + w) / pixelsPerSecond) + 1;
 
         gcTimeline.setStroke(Color.GRAY);
-        gcTimeline.setLineWidth(1);
+        gcTimeline.setLineWidth(0.7); // Línea más fina
 
         for (int i = startSec; i <= endSec; i += stepTime) {
             double x = (i * pixelsPerSecond) - scrollOffset;
 
-            // Rayita grande
-            gcTimeline.strokeLine(x, 0, x, 15);
+            // ✅ Rayita grande: Reducida de 15 a 10
+            gcTimeline.strokeLine(x, 0, x, 10);
 
             gcTimeline.setFill(Color.GRAY);
-            gcTimeline.setFont(Font.font("Arial", 10));
-            gcTimeline.fillText(formatShortTime(i), x + 2, 12);
+            // ✅ Fuente: Reducida de 10 a 8
+            gcTimeline.setFont(Font.font("Arial", 8));
+            // ✅ Posición texto: Ajustada de 12 a 9 para acompañar la marca
+            gcTimeline.fillText(formatShortTime(i), x + 2, 9);
 
             // Rayitas pequeñas
             if (stepTime >= 5) {
                 for (int j = 1; j < stepTime; j++) {
                     double sx = x + j * pixelsPerSecond;
                     if (sx - scrollOffset < w) {
-                        gcTimeline.strokeLine(sx, 0, sx, 5);
+                        // ✅ Rayita pequeña: Reducida de 5 a 3
+                        gcTimeline.strokeLine(sx, 0, sx, 3);
                     }
                 }
             }
         }
 
-        // CABEZAL DE REPRODUCCIÓN PROFESIONAL
+        // --- DIBUJO DEL HOVER TOOLTIP (Debajo de la regla) ---
+        if (hoverTime >= 0 && hoverTime <= totalTimelineDuration) {
+            double hX = (hoverTime * pixelsPerSecond) - scrollOffset;
+
+            // Línea vertical blanca tenue
+            gcTimeline.setStroke(Color.web("#ffffff", 0.3));
+            gcTimeline.strokeLine(hX, 0, hX, h);
+
+            // Recuadro con tiempo (mm:ss)
+            String timeStr = formatPreciseTime(hoverTime);
+            gcTimeline.setFont(Font.font("Arial", FontWeight.BOLD, 9));
+
+            double rectW = 34; double rectH = 14;
+            double rectX = hX - (rectW / 2);
+            double rectY = 12; // Posicionado justo bajo los números pequeños
+
+            gcTimeline.setFill(Color.web("#1a1a1a", 0.9));
+            gcTimeline.fillRoundRect(rectX, rectY, rectW, rectH, 4, 4);
+            gcTimeline.setFill(Color.WHITE);
+            gcTimeline.fillText(timeStr, rectX + 4, rectY + 10);
+        }
+
+        // Cabezal de reproducción rojo (Tu código original se mantiene igual)
         double phX = (currentTimelineTime * pixelsPerSecond) - scrollOffset;
         if (phX >= 0 && phX <= w) {
-            // 1. Línea vertical fina
             gcTimeline.setStroke(Color.RED);
             gcTimeline.setLineWidth(1.0);
             gcTimeline.strokeLine(phX, 0, phX, h);
-
-            // 2. Flecha Pequeña y Suave (Triángulo invertido)
             gcTimeline.setFill(Color.RED);
-            double arrowSize = 6.0; // Tamaño pequeño para que sea elegante
-
-            // Coordenadas del triángulo: Izquierda, Derecha, Punta (abajo)
+            double arrowSize = 6.0;
             double[] xPts = { phX - arrowSize, phX + arrowSize, phX };
             double[] yPts = { 0, 0, arrowSize + 2 };
-
             gcTimeline.fillPolygon(xPts, yPts, 3);
-
-            // 3. Opcional: Un pequeño círculo en la punta de la flecha para suavizarla
             gcTimeline.fillOval(phX - 1.5, arrowSize, 3, 3);
         }
     }
@@ -1954,6 +2033,14 @@ public class EditorController {
                         "#3b82f6", false));
                 // Resetear posición
                 currentTimelineTime = 0;
+
+                Platform.runLater(() -> {
+                    updateTimeLabel();        // Actualiza "00:00 / XX:XX"
+                    updateScrollbarAndRedraw(); // Dibuja el timeline
+                    redrawVideoCanvas();      // Dibuja el primer frame
+                    if (btnPlayPause != null) btnPlayPause.setText("▶");
+                });
+
                 if (timelineScroll != null) {
                     timelineScroll.setValue(0);
                     timelineScroll.setMax(totalTimelineDuration * pixelsPerSecond);
@@ -1961,10 +2048,6 @@ public class EditorController {
                 updateScrollbarAndRedraw();
                 videoService.pause();
                 videoService.seek(0); // Asegura que se vea el primer frame
-                // Sincronizar el botón visualmente (Icono Play)
-                if (btnPlayPause != null) {
-                    btnPlayPause.setText("▶"); // Asegurar que muestra el icono de "Darle Play"
-                }
             });
 
             task.setOnFailed(e -> {
@@ -2019,10 +2102,13 @@ public class EditorController {
             }
         }
 
-        checkPlaybackJump();
-        redrawTimeline();
-        redrawVideoCanvas();
-        updateTimeLabel();
+        // ✅ REFRESCAR TODO AL INSTANTE
+        Platform.runLater(() -> {
+            checkPlaybackJump();
+            redrawTimeline();
+            redrawVideoCanvas();
+            updateTimeLabel();
+        });
     }
 
     @FXML
@@ -3015,6 +3101,12 @@ public class EditorController {
         setToolCursor();
     }
 
+    private String formatPreciseTime(double seconds) {
+        int m = (int) seconds / 60;
+        int s = (int) seconds % 60;
+        // Formato mm:ss
+        return String.format("%02d:%02d", m, s);
+    }
 
 }
 

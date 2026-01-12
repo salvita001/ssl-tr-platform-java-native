@@ -193,10 +193,10 @@
     -fx-border-width: 0 1 0 0; /* Solo una línea fina a la derecha */
 }
 
-/* Botón Cerrar con texto rojo */
+/* Botón Cerrar */
 .tool-btn-secondary {
-    -fx-background-color: #2a2a2a;
-    -fx-text-fill: #ef4444; /* Rojo para el texto */
+    -fx-background-color: #7c3aed;
+    -fx-text-fill: #ffffff;
     -fx-font-weight: bold;
     -fx-padding: 8 16;      /* Aumentamos el ancho para el texto */
     -fx-background-radius: 5;
