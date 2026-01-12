@@ -52,6 +52,9 @@ public class AppIcons {
                 "M4,16 h1.5 v2.5 H8 V20 H4 V16 z " +
                 // 2. Cruz central (Forma de '+' con área)
                 "M12.5,9.5 h-1 v2 h-2 v1 h2 v2 h1 v-2 h2 v-1 h-2 v-2 z";
+
+            case "base" -> "M2,12a10,5 0 1,0 20,0a10,5 0 1,0 -20,0 M6,12a6,3 0 1,1 12,0a6,3 0 1,1 -12,0"; // Elipse con punto central
+
             // --- FILA 6: Tracking y Base ---
             case "tracking" ->
                 // 1. Figura Humana (Cabeza y Cuerpo)
