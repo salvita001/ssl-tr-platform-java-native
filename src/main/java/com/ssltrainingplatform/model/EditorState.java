@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class EditorState {
-    // Hacemos los campos 'public final' para acceder fácilmente sin getters/setters excesivos
     public final List<VideoSegment> segmentsSnapshot;
     public final List<DrawingShape> shapesSnapshot;
     public final double durationSnapshot;
