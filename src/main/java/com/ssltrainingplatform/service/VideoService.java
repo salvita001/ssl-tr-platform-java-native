@@ -27,7 +27,6 @@ public class VideoService {
     private Consumer<BufferedImage> onFrameCaptured;
     private long totalDuration = 0;
 
-    // YA LA TENÍAS DECLARADA, PERO ESTABA VACÍA
     private String sourcePath;
 
     public VideoService(ImageView targetView) {
@@ -146,7 +145,6 @@ public class VideoService {
 
     public boolean isPlaying() { return isPlaying.get(); }
 
-    // 2. CORRECCIÓN: AÑADIR EL GETTER QUE FALTABA
     public String getSourcePath() {
         return sourcePath;
     }

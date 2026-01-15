@@ -7,10 +7,7 @@ import com.ssltrainingplatform.dto.ExportRequest;
 import com.ssltrainingplatform.dto.SaveFrameRequest;
 import com.ssltrainingplatform.model.EditorState;
 import com.ssltrainingplatform.model.VideoSegment;
-import com.ssltrainingplatform.service.AIService;
-import com.ssltrainingplatform.service.FilmstripService;
-import com.ssltrainingplatform.service.VideoApiClient;
-import com.ssltrainingplatform.service.VideoService;
+import com.ssltrainingplatform.service.*;
 import com.ssltrainingplatform.model.DrawingShape;
 import com.ssltrainingplatform.util.AppIcons;
 import ai.djl.modality.cv.output.DetectedObjects;
@@ -180,6 +177,8 @@ public class EditorController {
     @FXML private ToggleButton btnClearCanvas;
 
     private double hoverTime = -1;
+
+    private String localVideoPath = null;
 
     // =========================================================================
     //                               INICIALIZACIÓN
@@ -1984,6 +1983,18 @@ public class EditorController {
         File f = fc.showOpenDialog(container.getScene().getWindow());
 
         if (f != null) {
+            this.localVideoPath = f.getAbsolutePath();
+
+            System.out.println("--- DIAGNÓSTICO DE IMPORTACIÓN ---");
+            if (this.localVideoPath != null) {
+                System.out.println("✅ USANDO RUTA LOCAL: " + this.localVideoPath);
+            } else {
+                System.err.println("⚠️ PELIGRO: La variable localVideoPath es NULL. La exportación fallará.");
+            }
+            System.out.println("-----------------------------------");
+
+            System.out.println("🎥 MODO LOCAL: Video cargado desde " + this.localVideoPath);
+
             // 1. MOSTRAR SPINNER
             if (loadingSpinner != null) loadingSpinner.setVisible(true);
 
@@ -1992,9 +2003,8 @@ public class EditorController {
 
             try {
                 videoService.loadVideo(f.getAbsolutePath());
-                new Thread(() -> {
+                /*new Thread(() -> {
                     try {
-                        System.out.println("Subiendo al servidor...");
                         // Llamamos al backend
                         this.serverVideoId = apiClient.uploadVideo(f);
                         System.out.println("✅ Video subido. ID Servidor: " + this.serverVideoId);
@@ -2008,7 +2018,7 @@ public class EditorController {
                             alert.show();
                         });
                     }
-                }).start();
+                }).start();*/
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -2273,77 +2283,59 @@ public class EditorController {
 
     @FXML
     public void onExportVideo() {
-        if (serverVideoId == null) {
-            mostrarAlerta("Error", "Sube el video primero.");
+        if (localVideoPath == null) {
+            mostrarAlerta("Error", "No hay video cargado.");
             return;
         }
 
         FileChooser fc = new FileChooser();
-        fc.setInitialFileName("analisis_tactico.mp4");
+        fc.setInitialFileName("analisis_final.mp4");
+        fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("MP4 Video", "*.mp4"));
         File destFile = fc.showSaveDialog(container.getScene().getWindow());
         if (destFile == null) return;
 
-        // Mostrar UI de progreso
         if (loadingSpinner != null) loadingSpinner.setVisible(true);
-        if (exportProgressBar != null) {
-            exportProgressBar.setVisible(true);
-            exportProgressBar.setProgress(0);
-        }
+        if (lblStatus != null) lblStatus.setText("Preparando exportación local...");
 
+        // Usamos un hilo para no congelar la UI
         new Thread(() -> {
             try {
-                List<ExportItem> items = new ArrayList<>();
-                int totalSegments = segments.size();
+                // 1. Preparar la lista de trabajos para el Servicio
+                List<LocalExportService.ExportJobSegment> jobSegments = new ArrayList<>();
 
-                // --- FASE 1: GENERACIÓN DE SNAPSHOTS LOCALES (0% a 50%) ---
-                for (int i = 0; i < totalSegments; i++) {
-                    final int currentIdx = i + 1;
-                    final double progress = (double) currentIdx / totalSegments * 0.5; // Escala al 50%
-
-                    Platform.runLater(() -> {
-                        if (lblStatus != null) lblStatus.setText("Procesando segmento " + currentIdx + " de " + totalSegments);
-                        if (exportProgressBar != null) exportProgressBar.setProgress(progress);
-                    });
-
-                    VideoSegment seg = segments.get(i);
+                for (VideoSegment seg : segments) {
                     if (seg.isFreezeFrame()) {
-                        // Generamos la imagen con dibujos usando el hilo de UI
-                        FutureTask<String> task = new FutureTask<>(() -> generateSnapshotForSegment(seg));
+                        // Generar imagen en el Hilo de JavaFX (obligatorio para Canvas)
+                        FutureTask<String> task = new FutureTask<>(() -> saveSnapshotToTempFile(seg));
                         Platform.runLater(task);
-                        String base64 = task.get();
-                        items.add(ExportItem.image(base64, seg.getDuration()));
+                        String imgPath = task.get(); // Esperamos a que se genere
+
+                        if (imgPath != null) {
+                            jobSegments.add(LocalExportService.ExportJobSegment.freeze(imgPath, seg.getDuration()));
+                        }
                     } else {
-                        items.add(ExportItem.video(seg.getSourceStartTime(), seg.getSourceEndTime()));
+                        jobSegments.add(LocalExportService.ExportJobSegment.video(seg.getSourceStartTime(), seg.getSourceEndTime()));
                     }
                 }
 
-                // --- FASE 2: PROCESAMIENTO EN SERVIDOR (50% a 90%) ---
+                // 2. LLAMAR AL SERVICIO DE FFMPEG
+                Platform.runLater(() -> lblStatus.setText("Renderizando video (FFmpeg)..."));
+
+                LocalExportService exportService = new LocalExportService();
+                exportService.renderProject(localVideoPath, jobSegments, destFile);
+
+                // 3. FINALIZAR
                 Platform.runLater(() -> {
-                    if (lblStatus != null) lblStatus.setText("Enviando al servidor para montaje final...");
-                    if (exportProgressBar != null) exportProgressBar.setProgress(0.7);
-                });
-
-                ExportRequest req = new ExportRequest(serverVideoId, items);
-                byte[] videoBytes = apiClient.exportVideo(req); // Llamada bloqueante a la API
-
-                // --- FASE 3: ESCRITURA EN DISCO (90% a 100%) ---
-                Platform.runLater(() -> {
-                    if (lblStatus != null) lblStatus.setText("Guardando archivo final...");
-                    if (exportProgressBar != null) exportProgressBar.setProgress(0.95);
-                });
-
-                Files.write(destFile.toPath(), videoBytes);
-
-                Platform.runLater(() -> {
-                    resetExportUI();
-                    mostrarAlerta("Éxito", "Vídeo exportado correctamente en: " + destFile.getName());
+                    if (loadingSpinner != null) loadingSpinner.setVisible(false);
+                    lblStatus.setText("✅ Exportación completada");
+                    mostrarAlerta("Éxito", "Video guardado en: " + destFile.getAbsolutePath());
                 });
 
             } catch (Exception e) {
                 e.printStackTrace();
                 Platform.runLater(() -> {
-                    resetExportUI();
-                    mostrarAlerta("Error", "Fallo en la exportación: " + e.getMessage());
+                    if (loadingSpinner != null) loadingSpinner.setVisible(false);
+                    mostrarAlerta("Error", "Fallo al exportar: " + e.getMessage());
                 });
             }
         }).start();
@@ -2459,11 +2451,68 @@ public class EditorController {
             }
 
             WritableImage snap = tempCanvas.snapshot(null, null);
-            java.awt.image.BufferedImage bImage = SwingFXUtils.fromFXImage(snap, null);
-            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-            javax.imageio.ImageIO.write(bImage, "png", out);
-            return java.util.Base64.getEncoder().encodeToString(out.toByteArray());
-        } catch (Exception e) { return null; }
+            BufferedImage bImage = SwingFXUtils.fromFXImage(snap, null);
+            ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            ImageIO.write(bImage, "png", out);
+            return Base64.getEncoder().encodeToString(out.toByteArray());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String saveSnapshotToTempFile(VideoSegment seg) {
+        try {
+            double exportW = 1280; double exportH = 720;
+            Canvas tempCanvas = new Canvas(exportW, exportH);
+            GraphicsContext gc = tempCanvas.getGraphicsContext2D();
+
+            Image bg = seg.getThumbnail();
+            if (bg == null) return null;
+
+            gc.drawImage(bg, 0, 0, exportW, exportH);
+
+            // Parámetros de escala originales
+            double canvasW = drawCanvas.getWidth();
+            double canvasH = drawCanvas.getHeight();
+            double scale = Math.min(canvasW / bg.getWidth(), canvasH / bg.getHeight());
+            double vidDispW = bg.getWidth() * scale;
+            double vidDispH = bg.getHeight() * scale;
+            double offX = (canvasW - vidDispW) / 2.0;
+            double offY = (canvasH - vidDispH) / 2.0;
+
+            // ✅ PASO CLAVE: Combinar dibujos guardados y dibujos "vivos"
+            List<DrawingShape> allToDraw = new ArrayList<>();
+            // 1. Añadir lo que ya estaba en la caché (guardado anteriormente)
+            List<DrawingShape> cached = annotationsCache.get(seg.getId());
+            if (cached != null) allToDraw.addAll(cached);
+
+            // 2. Añadir dibujos actuales que pertenezcan a este clip pero no estén en caché
+            for (DrawingShape s : shapes) {
+                if (seg.getId().equals(s.getClipId())) {
+                    if (cached == null || !cached.contains(s)) {
+                        allToDraw.add(s);
+                    }
+                }
+            }
+
+            // Dibujar todo el conjunto combinado
+            for (DrawingShape s : allToDraw) {
+                drawShapeScaledToVideo(gc, s, offX, offY, vidDispW, vidDispH, exportW, exportH, bg);
+            }
+
+            // AL FINAL, EN LUGAR DE BASE64, GUARDAMOS A DISCO:
+            WritableImage snap = tempCanvas.snapshot(null, null);
+            BufferedImage bImage = SwingFXUtils.fromFXImage(snap, null);
+
+            // Crear archivo temporal
+            File tempFile = File.createTempFile("freeze_", ".png");
+            ImageIO.write(bImage, "png", tempFile);
+
+            return tempFile.getAbsolutePath(); // ✅ Retornamos la ruta
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
     }
 
     private void drawShapeScaledToVideo(GraphicsContext gc, DrawingShape s,
@@ -2486,93 +2535,6 @@ public class EditorController {
 
         // 4. Llamamos al dibujante enviando los márgenes para ajustar puntos internos
         drawShapeOnExternalGC(gc, s, bg, x1, y1, x2, y2, size, sx, sy, offX, offY);
-    }
-
-    @FXML
-    public void onSaveFrame() {
-        if (serverVideoId == null) {
-            mostrarAlerta("Error", "Sube el video primero.");
-            return;
-        }
-        saveState();
-
-        double currentTime = videoService.getCurrentTime();
-        List<DrawingShape> currentShapes = new ArrayList<>(shapes);
-
-        if (currentShapes.isEmpty()) {
-            mostrarAlerta("Aviso", "Dibuja algo antes de guardar.");
-            return;
-        }
-
-        VideoSegment activeSeg = getCurrentSegment();
-        final boolean alreadyHasSegment = (activeSeg != null && activeSeg.isFreezeFrame());
-
-        final String segmentIdToUse = alreadyHasSegment ? activeSeg.getId() : UUID.randomUUID().toString();
-
-        if (loadingSpinner != null) loadingSpinner.setVisible(true);
-
-        new Thread(() -> {
-            try {
-                String frameId = apiClient.captureFrame(serverVideoId, currentTime);
-
-                SaveFrameRequest saveReq = new SaveFrameRequest();
-                saveReq.setFrameId(frameId);
-                saveReq.setPausePointId(segmentIdToUse);
-                saveReq.setDuration(3.0);
-                saveReq.setAnnotationsJson(new Gson().toJson(currentShapes));
-                saveReq.setOriginalWidth((int) drawCanvas.getWidth());
-                saveReq.setOriginalHeight((int) drawCanvas.getHeight());
-
-                apiClient.saveAnnotation(saveReq);
-
-                Platform.runLater(() -> {
-                    Image rawVideoImage = videoView.getImage();
-
-                    if (!alreadyHasSegment) {
-                        double duration = 3.0;
-                        VideoSegment freezeSeg = new VideoSegment(
-                                currentTimelineTime,
-                                currentTimelineTime + duration,
-                                currentTime,
-                                currentTime,
-                                "#00bcd4",
-                                true
-                        );
-
-                        // Asignar la imagen pura al segmento
-                        freezeSeg.setThumbnail(rawVideoImage);
-
-                        int index = segments.indexOf(activeSeg);
-                        if (index != -1) {
-                            segments.add(index + 1, freezeSeg);
-                        } else {
-                            segments.add(freezeSeg);
-                        }
-                        totalTimelineDuration += duration;
-                    } else {
-                        activeSeg.setThumbnail(rawVideoImage);
-                    }
-
-                    annotationsCache.put(segmentIdToUse, new ArrayList<>(currentShapes));
-
-                    for(DrawingShape s : currentShapes) {
-                        s.setClipId(segmentIdToUse);
-                    }
-
-                    shapes.clear();
-                    redrawVideoCanvas();
-                    updateScrollbarAndRedraw();
-
-                    if (loadingSpinner != null) loadingSpinner.setVisible(false);
-                    mostrarAlerta("Éxito", "Análisis guardado correctamente.");
-                });
-            } catch (Exception e) {
-                e.printStackTrace();
-                Platform.runLater(() -> {
-                    if (loadingSpinner != null) loadingSpinner.setVisible(false);
-                });
-            }
-        }).start();
     }
 
     private void drawShapeOnExternalGC(GraphicsContext gc, DrawingShape s, Image backgroundImage,
@@ -2858,9 +2820,6 @@ public class EditorController {
     private void initTimelineContextMenu() {
         timelineContextMenu = new ContextMenu();
 
-        MenuItem saveFrameItem = new MenuItem("Guardar");
-        saveFrameItem.setOnAction(e -> onSaveFrame());
-
         MenuItem modifyTimeItem = new MenuItem("Modificar Duración");
         modifyTimeItem.setOnAction(e -> onModifyFreezeDuration());
 
@@ -2876,7 +2835,6 @@ public class EditorController {
 
         // Añadimos la nueva opción al principio
         timelineContextMenu.getItems().addAll(
-                saveFrameItem,
                 modifyTimeItem,
                 new SeparatorMenuItem(),
                 captureItem,
@@ -2920,7 +2878,7 @@ public class EditorController {
 
     private void autoSaveActiveSegmentDrawings() {
         // Si no hay dibujos o no hay video cargado, no hacemos nada
-        if (shapes.isEmpty() || serverVideoId == null) return;
+        if (shapes.isEmpty()) return;
 
         VideoSegment activeSeg = getCurrentSegment();
         if (activeSeg == null || !activeSeg.isFreezeFrame()) return;
@@ -2939,23 +2897,7 @@ public class EditorController {
         // Limpiamos shapes para que el sistema sepa que ya están "procesados"
         shapes.clear();
 
-        // 2. Guardado en servidor en segundo plano (sin bloquear la UI)
-        new Thread(() -> {
-            try {
-                // Reutilizamos la lógica de tu onSaveFrame para persistir en la DB
-                SaveFrameRequest saveReq = new SaveFrameRequest();
-                saveReq.setPausePointId(segmentId);
-                // Enviamos la lista completa (los antiguos + los nuevos)
-                saveReq.setAnnotationsJson(new Gson().toJson(annotationsCache.get(segmentId)));
-                saveReq.setOriginalWidth((int) drawCanvas.getWidth());
-                saveReq.setOriginalHeight((int) drawCanvas.getHeight());
-
-                apiClient.saveAnnotation(saveReq);
-                System.out.println("✅ Auto-save exitoso para el clip: " + segmentId);
-            } catch (Exception e) {
-                System.err.println("⚠️ Error en auto-save silencioso: " + e.getMessage());
-            }
-        }).start();
+        System.out.println("✅ Dibujos guardados en memoria local para exportación.");
     }
 
     private void runAIDetectionManual() {
