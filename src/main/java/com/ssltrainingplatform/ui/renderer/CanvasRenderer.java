@@ -13,6 +13,7 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.transform.Affine;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class CanvasRenderer {
@@ -369,5 +370,227 @@ public class CanvasRenderer {
         gcDraw.setLineDashes(null);
     }
 
+    public void drawShapeOnGC(GraphicsContext gc, DrawingShape s, Image backgroundImage,
+                                       double x1, double y1, double x2, double y2,
+                                       double size, double sx, double sy, double offX, double offY) {
+
+        Color c = Color.web(s.getColor());
+        gc.setStroke(c);
+        gc.setFill(c);
+        gc.setLineWidth(size);
+        gc.setLineCap(StrokeLineCap.ROUND);
+
+        switch (s.getType()) {
+            case "arrow":
+                drawProArrow(gc, x1, y1, x2, y2, c, size, false);
+                break;
+            case "arrow-dashed":
+                drawProArrow(gc, x1, y1, x2, y2, c, size, true);
+                break;
+            case "arrow-3d":
+                double cx3d = (x1 + x2) / 2;
+                double cy3d = Math.min(y1, y2) - Math.abs(x2 - x1) * 0.3;
+                drawCurvedArrow(gc, x1, y1, cx3d, cy3d, x2, y2, c, size);
+                break;
+            case "pen":
+                gc.setLineWidth(size);
+                if (s.getPoints() != null && s.getPoints().size() > 2) {
+                    gc.beginPath();
+                    // Ajustamos cada punto: (Coordenada - Margen) * Escala
+                    gc.moveTo((s.getPoints().get(0) - offX) * sx, (s.getPoints().get(1) - offY) * sy);
+                    for (int i = 2; i < s.getPoints().size(); i += 2) {
+                        gc.lineTo((s.getPoints().get(i) - offX) * sx, (s.getPoints().get(i + 1) - offY) * sy);
+                    }
+                    gc.stroke();
+                }
+                break;
+            case "wall":
+                gc.setLineWidth(2.0 * sx);
+                drawSimpleWall(gc, x1, y1, x2, y2, c, 80.0 * sy);
+                break;
+            case "base":
+                gc.setLineWidth(2.0 * sx);
+                drawProBase(gc, x1, y1, x2, y2, c, size);
+                break;
+            case "spotlight":
+                gc.setLineWidth(2.0 * sx);
+                drawProSpotlight(gc, x1, y1, x2, y2, c, size);
+                break;
+            case "polygon":
+                if (s.getPoints() != null && s.getPoints().size() >= 4) {
+                    gc.setLineWidth(2.0 * sx);
+                    List<Double> scaledPts = new ArrayList<>();
+                    for (int i = 0; i < s.getPoints().size(); i += 2) {
+                        scaledPts.add((s.getPoints().get(i) - offX) * sx);
+                        scaledPts.add((s.getPoints().get(i + 1) - offY) * sy);
+                    }
+                    drawFilledPolygon(gc, scaledPts, c);
+                }
+                break;
+            case "rect-shaded":
+                gc.setLineWidth(2.0 * sx);
+                drawShadedRect(gc, x1, y1, x2, y2, c);
+                break;
+            case "text":
+                if (s.getTextValue() != null) {
+                    double fontSize = size * 2.5;
+                    gc.setFont(Font.font("Arial", FontWeight.BOLD, fontSize));
+                    gc.setStroke(Color.BLACK);
+                    gc.setLineWidth(1.5 * sx);
+                    gc.strokeText(s.getTextValue(), x1, y1);
+                    gc.setFill(c);
+                    gc.fillText(s.getTextValue(), x1, y1);
+                }
+                break;
+            case "zoom-circle":
+                drawRealZoom(gc, x1, y1, x2, y2, c, backgroundImage, sx, true);
+                break;
+            case "zoom-rect":
+                drawRealZoom(gc, x1, y1, x2, y2, c, backgroundImage, sx, false);
+                break;
+        }
+    }
+
+    private void drawProArrow(GraphicsContext gc, double x1, double y1, double x2, double y2, Color color, double size,
+                              boolean dashed) {
+
+        gc.setLineWidth(size / 3.0);
+
+        if (dashed) gc.setLineDashes(10 * size/20.0, 10 * size/20.0);
+        else gc.setLineDashes(null);
+
+        double angle = Math.atan2(y2 - y1, x2 - x1);
+        double headLen = size * 1.5;
+
+        gc.strokeLine(x1, y1, x2 - (headLen * 0.8 * Math.cos(angle)), y2 - (headLen * 0.8 * Math.sin(angle)));
+
+        gc.setLineDashes(null);
+        drawArrowHead(gc, x2, y2, angle, size, color);
+    }
+
+    private void drawArrowHead(GraphicsContext gc, double x, double y, double angle, double size, Color color) {
+        double headLen = size * 1.5;
+        double xBase = x - headLen * Math.cos(angle);
+        double yBase = y - headLen * Math.sin(angle);
+        double x3 = xBase + size * Math.cos(angle - Math.PI/2);
+        double y3 = yBase + size * Math.sin(angle - Math.PI/2);
+        double x4 = xBase + size * Math.cos(angle + Math.PI/2);
+        double y4 = yBase + size * Math.sin(angle + Math.PI/2);
+        gc.setFill(color);
+        gc.fillPolygon(new double[]{x, x3, x4}, new double[]{y, y3, y4}, 3);
+    }
+
+    private void drawCurvedArrow(GraphicsContext gc, double x1, double y1, double cx, double cy, double x2,
+                                     double y2, Color color, double size) {
+        gc.setStroke(color);
+        gc.setFill(color);
+        gc.setLineWidth(size / 3.0);
+
+        double angle = Math.atan2(y2 - cy, x2 - cx);
+        double headLen = size * 1.5;
+
+        double lineEndX = x2 - (headLen * 0.5) * Math.cos(angle);
+        double lineEndY = y2 - (headLen * 0.5) * Math.sin(angle);
+
+        gc.beginPath();
+        gc.moveTo(x1, y1);
+        gc.quadraticCurveTo(cx, cy, lineEndX, lineEndY);
+        gc.stroke();
+
+        drawArrowHead(gc, x2, y2, angle, size, color);
+    }
+
+    private void drawSimpleWall(GraphicsContext gc, double x1, double y1, double x2, double y2, Color c,
+                                double wallHeight) {
+        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.25));
+        gc.fillPolygon(new double[]{x1, x2, x2, x1},
+                new double[]{y1, y2, y2 - wallHeight, y1 - wallHeight}, 4);
+        gc.setStroke(c);
+        gc.strokeLine(x1, y1, x2, y2);
+        gc.strokeLine(x1, y1, x1, y1 - wallHeight);
+        gc.strokeLine(x2, y2, x2, y2 - wallHeight);
+    }
+
+    private void drawFilledPolygon(GraphicsContext gc, List<Double> pts, Color c) {
+        int n = pts.size() / 2;
+        double[] xs = new double[n]; double[] ys = new double[n];
+        for (int i = 0; i < n; i++) { xs[i] = pts.get(i*2); ys[i] = pts.get(i*2+1); }
+        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.4));
+        gc.fillPolygon(xs, ys, n);
+        gc.strokePolygon(xs, ys, n);
+    }
+
+    private void drawShadedRect(GraphicsContext gc, double x1, double y1, double x2, double y2, Color c) {
+        double l = Math.min(x1, x2);
+        double t = Math.min(y1, y2);
+        double w = Math.abs(x2-x1);
+        double h = Math.abs(y2-y1);
+        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.3));
+        gc.fillRect(l, t, w, h);
+        gc.strokeRect(l, t, w, h);
+    }
+
+    private void drawProSpotlight(GraphicsContext gc, double x1, double y1, double x2, double y2, Color c,
+                                  double size) {
+        double rxTop = size * 1.5;
+        double ryTop = rxTop * 0.3;
+        double rxBot = size * 3.0 + Math.abs(x2-x1)*0.2;
+        double ryBot = rxBot * 0.3;
+        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.2));
+        gc.fillPolygon(new double[]{x1-rxTop, x2-rxBot, x2+rxBot, x1+rxTop}, new double[]{y1, y2, y2, y1}, 4);
+        gc.strokeOval(x1-rxTop, y1-ryTop, rxTop*2, ryTop*2);
+        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.4));
+        gc.fillOval(x2-rxBot, y2-ryBot, rxBot*2, ryBot*2);
+    }
+
+    private void drawProBase(GraphicsContext gc, double x1, double y1, double x2, double y2, Color c, double size) {
+        gc.setLineWidth(size);
+
+        double radius = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+
+        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.3));
+        gc.fillOval(x1 - radius, y1 - radius * 0.4, radius * 2, radius * 0.8);
+
+        gc.strokeOval(x1 - radius, y1 - radius * 0.4, radius * 2, radius * 0.8);
+    }
+
+    private void drawRealZoom(GraphicsContext gc, double x1, double y1, double x2, double y2,
+                                  Color c, Image img, double sx, boolean circle) {
+        double w = Math.abs(x2 - x1);
+        double h = Math.abs(y2 - y1);
+        double left = Math.min(x1, x2);
+        double top = Math.min(y1, y2);
+
+        if (img == null) return;
+
+        double exportW = 1280;
+        double exportH = 720;
+
+        gc.save();
+        gc.beginPath();
+        if (circle) gc.arc(left + w/2, top + h/2, w/2, h/2, 0, 360);
+        else gc.rect(left, top, w, h);
+        gc.closePath();
+        gc.clip();
+
+        double zoomFactor = 2.0;
+        double centerX = left + w/2;
+        double centerY = top + h/2;
+
+        Affine transform = new Affine();
+        transform.appendTranslation(centerX, centerY);
+        transform.appendScale(zoomFactor, zoomFactor);
+        transform.appendTranslation(-centerX, -centerY);
+        gc.setTransform(transform);
+
+        gc.drawImage(img, 0, 0, exportW, exportH);
+
+        gc.restore();
+
+        gc.setStroke(c);
+        gc.setLineWidth(2.0 * sx);
+        if (circle) gc.strokeOval(left, top, w, h);
+        else gc.strokeRect(left, top, w, h);
+    }
 
 }

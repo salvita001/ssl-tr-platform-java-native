@@ -642,239 +642,254 @@ public class EditorController {
     // =========================================================================
 
     private void setupMouseEvents() {
-        drawCanvas.setOnMousePressed(e -> {
-            lastMouseX = e.getX();
-            lastMouseY = e.getY();
-            dragMode = 0;
+        drawCanvas.setOnMousePressed(this::onCanvasPressed);
+        drawCanvas.setOnMouseDragged(this::onCanvasDragged);
+        drawCanvas.setOnMouseReleased(this::onCanvasReleased);
+    }
 
-            VideoSegment currentSeg = timelineManager.getSegmentAt(currentTimelineTime);
+    private void onCanvasPressed(MouseEvent e) {
+        lastMouseX = e.getX();
+        lastMouseY = e.getY();
+        dragMode = 0;
 
-            if (currentTool == ToolType.CURSOR) {
-                if (selectedShapeToMove != null
-                        && checkHandles(selectedShapeToMove, e.getX(), e.getY())) {
-                    saveState();
-                    redrawVideoCanvas();
-                    return;
-                }
+        VideoSegment currentSeg = timelineManager.getSegmentAt(currentTimelineTime);
 
-                selectedShapeToMove = null;
-
-                for (int i = shapes.size() - 1; i >= 0; i--) {
-                    DrawingShape s = shapes.get(i);
-                    if (s.getClipId() != null && currentSeg != null &&
-                            !s.getClipId().equals(currentSeg.getId())) {
-                        continue;
-                    }
-
-                    if (s.isHit(e.getX(), e.getY())) {
-                        saveState();
-                        selectedShapeToMove = s;
-                        dragMode = 1;
-                        if(colorPicker != null) colorPicker.setValue(Color.web(s.getColor()));
-                        if(sizeSlider != null) sizeSlider.setValue(s.getStrokeWidth());
-                        break;
-                    }
-                }
+        if (currentTool == ToolType.CURSOR) {
+            if (selectedShapeToMove != null
+                    && checkHandles(selectedShapeToMove, e.getX(), e.getY())) {
+                saveState();
                 redrawVideoCanvas();
                 return;
             }
 
-            if (currentTool == ToolType.TRACKING) {
-                VideoSegment currentSegTrack = timelineManager.getSegmentAt(currentTimelineTime);
-                if (currentSegTrack == null) return;
-
-                if (currentDetections.isEmpty()) {
-                    runAIDetectionManual();
-                    return;
-                }
-
-                saveState();
-                double minDist = 100.0;
-                trackedObject = null;
-
-                Image vidImg = videoView.getImage();
-                double sc = Math.min(drawCanvas.getWidth() / vidImg.getWidth(),
-                        drawCanvas.getHeight() / vidImg.getHeight());
-                double vDW = vidImg.getWidth() * sc; double vDH = vidImg.getHeight() * sc;
-                double oX = (drawCanvas.getWidth() - vDW) / 2.0;
-                double oY = (drawCanvas.getHeight() - vDH) / 2.0;
-
-                for (var obj : currentDetections) {
-                    if (obj.getClassName().equals("person")) {
-                        var r = obj.getBoundingBox().getBounds();
-                        double cx = ((r.getX() + r.getWidth()/2.0) / 640.0) * vDW + oX;
-                        double cy = ((r.getY() + r.getHeight()) / 640.0) * vDH + oY;
-
-                        double dist = Math.sqrt(Math.pow(e.getX() - cx, 2) + Math.pow(e.getY() - cy, 2));
-
-                        if (dist < minDist) {
-                            trackedObject = obj;
-                            minDist = dist;
-                        }
-                    }
-                }
-
-                if (trackedObject != null) {
-                    var r = trackedObject.getBoundingBox().getBounds();
-                    double cX = ((r.getX() + r.getWidth()/2.0) / 640.0) * vDW + oX;
-                    double headY = (r.getY() / 640.0) * vDH + oY;
-                    double footY = ((r.getY() + r.getHeight()) / 640.0) * vDH + oY;
-
-                    trackingShape = new DrawingShape("track_" + System.currentTimeMillis(),
-                            "tracking", cX, headY, toHex(colorPicker.getValue()));
-                    trackingShape.setEndX(cX);
-                    trackingShape.setEndY(footY);
-                    trackingShape.setClipId(currentSegTrack.getId());
-
-                    shapes.add(trackingShape);
-                    redrawVideoCanvas();
-                }
-                return;
-            }
-
-            if (currentSeg != null && !currentSeg.isFreezeFrame()) {
-                if (videoService.isPlaying()) {
-                    videoService.pause();
-                    btnPlayPause.setText("▶");
-                }
-                saveState();
-                timelineManager.insertFreezeFrame(currentTimelineTime, 3.0, videoView.getImage());
-                currentSeg = timelineManager.getSegmentAt(currentTimelineTime);
-            }
-
-            // ---------------------------------------------------------
-            // 2. MODO CREACIÓN
-            // ---------------------------------------------------------
             selectedShapeToMove = null;
 
-            if (currentTool == ToolType.TEXT) {
-                showFloatingInput(e.getX(), e.getY());
+            for (int i = shapes.size() - 1; i >= 0; i--) {
+                DrawingShape s = shapes.get(i);
+                if (s.getClipId() != null && currentSeg != null &&
+                        !s.getClipId().equals(currentSeg.getId())) {
+                    continue;
+                }
+
+                if (s.isHit(e.getX(), e.getY())) {
+                    saveState();
+                    selectedShapeToMove = s;
+                    dragMode = 1;
+                    if(colorPicker != null) colorPicker.setValue(Color.web(s.getColor()));
+                    if(sizeSlider != null) sizeSlider.setValue(s.getStrokeWidth());
+                    break;
+                }
+            }
+            redrawVideoCanvas();
+            return;
+        }
+
+        if (currentTool == ToolType.TRACKING) {
+            handleTrackingClick(e, currentSeg);
+            return;
+        }
+
+        if (currentSeg != null && !currentSeg.isFreezeFrame()) {
+            if (videoService.isPlaying()) {
+                videoService.pause();
+                btnPlayPause.setText("▶");
+            }
+            saveState();
+            timelineManager.insertFreezeFrame(currentTimelineTime, 3.0, videoView.getImage());
+            currentSeg = timelineManager.getSegmentAt(currentTimelineTime);
+        }
+
+        // ---------------------------------------------------------
+        // 2. MODO CREACIÓN
+        // ---------------------------------------------------------
+        selectedShapeToMove = null;
+
+        if (currentTool == ToolType.TEXT) {
+            showFloatingInput(e.getX(), e.getY());
+            return;
+        }
+
+        createNewShape(e, currentSeg);
+    }
+
+    private void createNewShape(MouseEvent e, VideoSegment currentSeg) {
+        Color c = colorPicker != null ? colorPicker.getValue() : Color.RED;
+        double s = currentStrokeWidth;
+
+        if (currentTool == ToolType.PEN) {
+            saveState();
+            currentShape = new DrawingShape("pen"+System.currentTimeMillis(),
+                    "pen", e.getX(), e.getY(), toHex(c));
+
+            if (currentSeg != null) currentShape.setClipId(currentSeg.getId());
+
+            currentShape.setStrokeWidth(s);
+            currentShape.addPoint(e.getX(), e.getY());
+            shapes.add(currentShape);
+            redrawVideoCanvas();
+            return;
+        }
+
+        if (currentTool == ToolType.POLYGON) {
+
+            if (e.getClickCount() == 2 || e.getButton() == MouseButton.SECONDARY) {
+                finishPolyShape();
                 return;
             }
 
-            Color c = colorPicker != null ? colorPicker.getValue() : Color.RED;
-            double s = currentStrokeWidth;
-
-            if (currentTool == ToolType.PEN) {
+            if (currentShape == null || !"polygon".equals(currentShape.getType())) {
                 saveState();
-                currentShape = new DrawingShape("pen"+System.currentTimeMillis(),
-                        "pen", e.getX(), e.getY(), toHex(c));
+                currentShape = new DrawingShape("p" + System.currentTimeMillis(),
+                        "polygon", e.getX(), e.getY(), toHex(c));
 
                 if (currentSeg != null) currentShape.setClipId(currentSeg.getId());
 
                 currentShape.setStrokeWidth(s);
                 currentShape.addPoint(e.getX(), e.getY());
+                currentShape.addPoint(e.getX(), e.getY());
                 shapes.add(currentShape);
-                redrawVideoCanvas();
-                return;
-            }
-
-            if (currentTool == ToolType.POLYGON) {
-
-                if (e.getClickCount() == 2 || e.getButton() == MouseButton.SECONDARY) {
+            } else {
+                currentShape.addPoint(e.getX(), e.getY());
+                if (currentShape.getPoints().size() >= 10) {
                     finishPolyShape();
                     return;
                 }
+            }
 
-                if (currentShape == null || !"polygon".equals(currentShape.getType())) {
-                    saveState();
-                    currentShape = new DrawingShape("p" + System.currentTimeMillis(),
-                            "polygon", e.getX(), e.getY(), toHex(c));
+            redrawVideoCanvas();
+            return;
+        }
 
-                    if (currentSeg != null) currentShape.setClipId(currentSeg.getId());
+        // ARRASTRE
+        String type = switch(currentTool) {
+            case ARROW -> "arrow";
+            case ARROW_DASHED -> "arrow-dashed";
+            case ARROW_3D -> "arrow-3d";
+            case SPOTLIGHT -> "spotlight";
+            case BASE -> "base";
+            case WALL -> "wall";
+            case RECT_SHADED -> "rect-shaded";
+            case ZOOM_CIRCLE -> "zoom-circle";
+            case ZOOM_RECT -> "zoom-rect";
+            default -> "arrow";
+        };
 
-                    currentShape.setStrokeWidth(s);
-                    currentShape.addPoint(e.getX(), e.getY());
-                    currentShape.addPoint(e.getX(), e.getY());
-                    shapes.add(currentShape);
-                } else {
-                    currentShape.addPoint(e.getX(), e.getY());
-                    if (currentShape.getPoints().size() >= 10) {
-                        finishPolyShape();
-                        return;
-                    }
+        saveState();
+
+        currentShape = new DrawingShape("s" + System.currentTimeMillis(), type, e.getX(), e.getY(), toHex(c));
+
+        if (currentSeg != null) currentShape.setClipId(currentSeg.getId());
+        currentShape.setStrokeWidth(s);
+
+        if ("arrow-3d".equals(type)) {
+            currentShape.addPoint(e.getX(), e.getY() - 50);
+        }
+        shapes.add(currentShape);
+    }
+
+    private void handleTrackingClick (MouseEvent e, VideoSegment currentSegTrack) {
+
+        if (currentSegTrack == null) return;
+
+        if (currentDetections.isEmpty()) {
+            runAIDetectionManual();
+            return;
+        }
+
+        saveState();
+        double minDist = 100.0;
+        trackedObject = null;
+
+        Image vidImg = videoView.getImage();
+        if (vidImg == null) return;
+
+        double sc = Math.min(drawCanvas.getWidth() / vidImg.getWidth(),
+                drawCanvas.getHeight() / vidImg.getHeight());
+        double vDW = vidImg.getWidth() * sc;
+        double vDH = vidImg.getHeight() * sc;
+        double oX = (drawCanvas.getWidth() - vDW) / 2.0;
+        double oY = (drawCanvas.getHeight() - vDH) / 2.0;
+
+        for (var obj : currentDetections) {
+            if (obj.getClassName().equals("person")) {
+                var r = obj.getBoundingBox().getBounds();
+                double cx = ((r.getX() + r.getWidth()/2.0) / 640.0) * vDW + oX;
+                double cy = ((r.getY() + r.getHeight()) / 640.0) * vDH + oY;
+
+                double dist = Math.sqrt(Math.pow(e.getX() - cx, 2) + Math.pow(e.getY() - cy, 2));
+
+                if (dist < minDist) {
+                    trackedObject = obj;
+                    minDist = dist;
                 }
-
-                redrawVideoCanvas();
-                return;
             }
+        }
 
-            // ARRASTRE
-            String type = switch(currentTool) {
-                case ARROW -> "arrow";
-                case ARROW_DASHED -> "arrow-dashed";
-                case ARROW_3D -> "arrow-3d";
-                case SPOTLIGHT -> "spotlight";
-                case BASE -> "base";
-                case WALL -> "wall";
-                case RECT_SHADED -> "rect-shaded";
-                case ZOOM_CIRCLE -> "zoom-circle";
-                case ZOOM_RECT -> "zoom-rect";
-                default -> "arrow";
-            };
+        if (trackedObject != null) {
+            var r = trackedObject.getBoundingBox().getBounds();
+            double cX = ((r.getX() + r.getWidth()/2.0) / 640.0) * vDW + oX;
+            double headY = (r.getY() / 640.0) * vDH + oY;
+            double footY = ((r.getY() + r.getHeight()) / 640.0) * vDH + oY;
 
-            saveState();
+            trackingShape = new DrawingShape("track_" + System.currentTimeMillis(),
+                    "tracking", cX, headY, toHex(colorPicker.getValue()));
+            trackingShape.setEndX(cX);
+            trackingShape.setEndY(footY);
+            trackingShape.setClipId(currentSegTrack.getId());
 
-            currentShape = new DrawingShape("s" + System.currentTimeMillis(), type, e.getX(), e.getY(), toHex(c));
+            shapes.add(trackingShape);
+            redrawVideoCanvas();
+        }
+    }
 
-            if (currentSeg != null) currentShape.setClipId(currentSeg.getId());
-            currentShape.setStrokeWidth(s);
+    private void onCanvasDragged(MouseEvent e) {
+        double dx = e.getX() - lastMouseX;
+        double dy = e.getY() - lastMouseY;
 
-            if ("arrow-3d".equals(type)) {
-                currentShape.addPoint(e.getX(), e.getY() - 50);
-            }
-            shapes.add(currentShape);
-        });
+        if (currentTool == ToolType.CURSOR && selectedShapeToMove != null) {
 
-        drawCanvas.setOnMouseDragged(e -> {
-            double dx = e.getX() - lastMouseX;
-            double dy = e.getY() - lastMouseY;
-
-            if (currentTool == ToolType.CURSOR && selectedShapeToMove != null) {
-
-                if (dragMode == 1) {
-                    selectedShapeToMove.move(dx, dy);
-                } else if (dragMode == 2) {
-                    selectedShapeToMove.setStartX(selectedShapeToMove.getStartX() + dx);
-                    selectedShapeToMove.setStartY(selectedShapeToMove.getStartY() + dy);
-                } else if (dragMode == 3) {
-                    selectedShapeToMove.setEndX(selectedShapeToMove.getEndX() + dx);
-                    selectedShapeToMove.setEndY(selectedShapeToMove.getEndY() + dy);
-                } else if (dragMode == 4 && dragPointIndex >= 0) {
-                    List<Double> pts = selectedShapeToMove.getPoints();
-                    if (dragPointIndex + 1 < pts.size()) {
-                        pts.set(dragPointIndex, pts.get(dragPointIndex) + dx);
-                        pts.set(dragPointIndex + 1, pts.get(dragPointIndex + 1) + dy);
-                    }
-                } else if (dragMode == 6 && "arrow-3d".equals(selectedShapeToMove.getType())) {
-                    List<Double> pts = selectedShapeToMove.getPoints();
-                    if (!pts.isEmpty()) {
-                        pts.set(0, pts.get(0) + dx);
-                        pts.set(1, pts.get(1) + dy);
-                    }
+            if (dragMode == 1) {
+                selectedShapeToMove.move(dx, dy);
+            } else if (dragMode == 2) {
+                selectedShapeToMove.setStartX(selectedShapeToMove.getStartX() + dx);
+                selectedShapeToMove.setStartY(selectedShapeToMove.getStartY() + dy);
+            } else if (dragMode == 3) {
+                selectedShapeToMove.setEndX(selectedShapeToMove.getEndX() + dx);
+                selectedShapeToMove.setEndY(selectedShapeToMove.getEndY() + dy);
+            } else if (dragMode == 4 && dragPointIndex >= 0) {
+                List<Double> pts = selectedShapeToMove.getPoints();
+                if (dragPointIndex + 1 < pts.size()) {
+                    pts.set(dragPointIndex, pts.get(dragPointIndex) + dx);
+                    pts.set(dragPointIndex + 1, pts.get(dragPointIndex + 1) + dy);
                 }
-
-                redrawVideoCanvas();
-            } else if (currentTool == ToolType.PEN && currentShape != null) {
-                currentShape.addPoint(e.getX(), e.getY());
-                redrawVideoCanvas();
-            } else if (currentShape != null && currentTool != ToolType.POLYGON) {
-                currentShape.setEndX(e.getX());
-                currentShape.setEndY(e.getY());
-                redrawVideoCanvas();
+            } else if (dragMode == 6 && "arrow-3d".equals(selectedShapeToMove.getType())) {
+                List<Double> pts = selectedShapeToMove.getPoints();
+                if (!pts.isEmpty()) {
+                    pts.set(0, pts.get(0) + dx);
+                    pts.set(1, pts.get(1) + dy);
+                }
             }
 
-            lastMouseX = e.getX();
-            lastMouseY = e.getY();
-        });
+            redrawVideoCanvas();
+        } else if (currentTool == ToolType.PEN && currentShape != null) {
+            currentShape.addPoint(e.getX(), e.getY());
+            redrawVideoCanvas();
+        } else if (currentShape != null && currentTool != ToolType.POLYGON) {
+            currentShape.setEndX(e.getX());
+            currentShape.setEndY(e.getY());
+            redrawVideoCanvas();
+        }
 
-        drawCanvas.setOnMouseReleased(e -> {
-            if (currentTool != ToolType.POLYGON && currentShape != null) {
-                switchToCursorAndSelect(currentShape);
-                currentShape = null;
-            }
-            dragMode = 0;
-        });
+        lastMouseX = e.getX();
+        lastMouseY = e.getY();
+    }
+
+    private void onCanvasReleased(MouseEvent e) {
+        if (currentTool != ToolType.POLYGON && currentShape != null) {
+            switchToCursorAndSelect(currentShape);
+            currentShape = null;
+        }
+        dragMode = 0;
     }
 
     private boolean checkHandles(DrawingShape s, double mx, double my) {
@@ -2019,223 +2034,7 @@ public class EditorController {
 
         double size = s.getStrokeWidth() * sx;
 
-        drawShapeOnExternalGC(gc, s, bg, x1, y1, x2, y2, size, sx, sy, offX, offY);
-    }
-
-    private void drawShapeOnExternalGC(GraphicsContext gc, DrawingShape s, Image backgroundImage,
-                                       double x1, double y1, double x2, double y2,
-                                       double size, double sx, double sy, double offX, double offY) {
-
-        Color c = Color.web(s.getColor());
-        gc.setStroke(c);
-        gc.setFill(c);
-        gc.setLineWidth(size);
-        gc.setLineCap(StrokeLineCap.ROUND);
-
-        switch (s.getType()) {
-            case "arrow":
-                drawProArrowOnGC(gc, x1, y1, x2, y2, c, size, false);
-                break;
-            case "arrow-dashed":
-                drawProArrowOnGC(gc, x1, y1, x2, y2, c, size, true);
-                break;
-            case "arrow-3d":
-                double cx3d = (x1 + x2) / 2;
-                double cy3d = Math.min(y1, y2) - Math.abs(x2 - x1) * 0.3;
-                drawCurvedArrowOnGC(gc, x1, y1, cx3d, cy3d, x2, y2, c, size);
-                break;
-            case "pen":
-                gc.setLineWidth(size);
-                if (s.getPoints() != null && s.getPoints().size() > 2) {
-                    gc.beginPath();
-                    // Ajustamos cada punto: (Coordenada - Margen) * Escala
-                    gc.moveTo((s.getPoints().get(0) - offX) * sx, (s.getPoints().get(1) - offY) * sy);
-                    for (int i = 2; i < s.getPoints().size(); i += 2) {
-                        gc.lineTo((s.getPoints().get(i) - offX) * sx, (s.getPoints().get(i + 1) - offY) * sy);
-                    }
-                    gc.stroke();
-                }
-                break;
-            case "wall":
-                gc.setLineWidth(2.0 * sx);
-                drawSimpleWallOnGC(gc, x1, y1, x2, y2, c, 80.0 * sy);
-                break;
-            case "base":
-                gc.setLineWidth(2.0 * sx);
-                drawProBaseOnGC(gc, x1, y1, x2, y2, c, size);
-                break;
-            case "spotlight":
-                gc.setLineWidth(2.0 * sx);
-                drawProSpotlightOnGC(gc, x1, y1, x2, y2, c, size);
-                break;
-            case "polygon":
-                if (s.getPoints() != null && s.getPoints().size() >= 4) {
-                    gc.setLineWidth(2.0 * sx);
-                    List<Double> scaledPts = new ArrayList<>();
-                    for (int i = 0; i < s.getPoints().size(); i += 2) {
-                        scaledPts.add((s.getPoints().get(i) - offX) * sx);
-                        scaledPts.add((s.getPoints().get(i + 1) - offY) * sy);
-                    }
-                    drawFilledPolygonOnGC(gc, scaledPts, c);
-                }
-                break;
-            case "rect-shaded":
-                gc.setLineWidth(2.0 * sx);
-                drawShadedRectOnGC(gc, x1, y1, x2, y2, c);
-                break;
-            case "text":
-                if (s.getTextValue() != null) {
-                    double fontSize = size * 2.5;
-                    gc.setFont(Font.font("Arial", FontWeight.BOLD, fontSize));
-                    gc.setStroke(Color.BLACK);
-                    gc.setLineWidth(1.5 * sx);
-                    gc.strokeText(s.getTextValue(), x1, y1);
-                    gc.setFill(c);
-                    gc.fillText(s.getTextValue(), x1, y1);
-                }
-                break;
-            case "zoom-circle":
-                drawRealZoomOnGC(gc, x1, y1, x2, y2, c, backgroundImage, sx, sy, true);
-                break;
-            case "zoom-rect":
-                drawRealZoomOnGC(gc, x1, y1, x2, y2, c, backgroundImage, sx, sy, false);
-                break;
-        }
-    }
-
-    private void drawProArrowOnGC(GraphicsContext gc, double x1, double y1, double x2, double y2, Color color, double size, boolean dashed) {
-
-        gc.setLineWidth(size / 3.0);
-
-        if (dashed) gc.setLineDashes(10 * size/20.0, 10 * size/20.0);
-        else gc.setLineDashes(null);
-
-        double angle = Math.atan2(y2 - y1, x2 - x1);
-        double headLen = size * 1.5;
-
-        gc.strokeLine(x1, y1, x2 - (headLen * 0.8 * Math.cos(angle)), y2 - (headLen * 0.8 * Math.sin(angle)));
-
-        gc.setLineDashes(null);
-        drawArrowHeadOnGC(gc, x2, y2, angle, size, color);
-    }
-
-    private void drawArrowHeadOnGC(GraphicsContext gc, double x, double y, double angle, double size, Color color) {
-        double headLen = size * 1.5;
-        double xBase = x - headLen * Math.cos(angle);
-        double yBase = y - headLen * Math.sin(angle);
-        double x3 = xBase + size * Math.cos(angle - Math.PI/2);
-        double y3 = yBase + size * Math.sin(angle - Math.PI/2);
-        double x4 = xBase + size * Math.cos(angle + Math.PI/2);
-        double y4 = yBase + size * Math.sin(angle + Math.PI/2);
-        gc.setFill(color);
-        gc.fillPolygon(new double[]{x, x3, x4}, new double[]{y, y3, y4}, 3);
-    }
-
-    private void drawCurvedArrowOnGC(GraphicsContext gc, double x1, double y1, double cx, double cy, double x2,
-                                     double y2, Color color, double size) {
-        gc.setStroke(color);
-        gc.setFill(color);
-        gc.setLineWidth(size / 3.0);
-
-        double angle = Math.atan2(y2 - cy, x2 - cx);
-        double headLen = size * 1.5;
-
-        double lineEndX = x2 - (headLen * 0.5) * Math.cos(angle);
-        double lineEndY = y2 - (headLen * 0.5) * Math.sin(angle);
-
-        gc.beginPath();
-        gc.moveTo(x1, y1);
-        gc.quadraticCurveTo(cx, cy, lineEndX, lineEndY);
-        gc.stroke();
-
-        drawArrowHeadOnGC(gc, x2, y2, angle, size, color);
-    }
-
-    private void drawSimpleWallOnGC(GraphicsContext gc, double x1, double y1, double x2, double y2, Color c, double wallHeight) {
-        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.25));
-        gc.fillPolygon(new double[]{x1, x2, x2, x1},
-                new double[]{y1, y2, y2 - wallHeight, y1 - wallHeight}, 4);
-        gc.setStroke(c);
-        gc.strokeLine(x1, y1, x2, y2);
-        gc.strokeLine(x1, y1, x1, y1 - wallHeight);
-        gc.strokeLine(x2, y2, x2, y2 - wallHeight);
-    }
-
-    private void drawFilledPolygonOnGC(GraphicsContext gc, List<Double> pts, Color c) {
-        int n = pts.size() / 2;
-        double[] xs = new double[n]; double[] ys = new double[n];
-        for (int i = 0; i < n; i++) { xs[i] = pts.get(i*2); ys[i] = pts.get(i*2+1); }
-        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.4));
-        gc.fillPolygon(xs, ys, n);
-        gc.strokePolygon(xs, ys, n);
-    }
-
-    private void drawShadedRectOnGC(GraphicsContext gc, double x1, double y1, double x2, double y2, Color c) {
-        double l = Math.min(x1, x2);
-        double t = Math.min(y1, y2);
-        double w = Math.abs(x2-x1);
-        double h = Math.abs(y2-y1);
-        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.3));
-        gc.fillRect(l, t, w, h);
-        gc.strokeRect(l, t, w, h);
-    }
-
-    private void drawProSpotlightOnGC(GraphicsContext gc, double x1, double y1, double x2, double y2, Color c, double size) {
-        double rxTop = size * 1.5;
-        double ryTop = rxTop * 0.3;
-        double rxBot = size * 3.0 + Math.abs(x2-x1)*0.2;
-        double ryBot = rxBot * 0.3;
-        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.2));
-        gc.fillPolygon(new double[]{x1-rxTop, x2-rxBot, x2+rxBot, x1+rxTop}, new double[]{y1, y2, y2, y1}, 4);
-        gc.strokeOval(x1-rxTop, y1-ryTop, rxTop*2, ryTop*2);
-        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.4));
-        gc.fillOval(x2-rxBot, y2-ryBot, rxBot*2, ryBot*2);
-    }
-
-    private void drawProBaseOnGC(GraphicsContext gc, double x1, double y1, double x2, double y2, Color c, double size) {
-        double radius = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
-        gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.3));
-        gc.fillOval(x1 - radius, y1 - radius * 0.4, radius * 2, radius * 0.8);
-        gc.strokeOval(x1 - radius, y1 - radius * 0.4, radius * 2, radius * 0.8);
-    }
-
-    private void drawRealZoomOnGC(GraphicsContext gc, double x1, double y1, double x2, double y2,
-                                  Color c, Image img, double sx, double sy, boolean circle) {
-        double w = Math.abs(x2 - x1);
-        double h = Math.abs(y2 - y1);
-        double left = Math.min(x1, x2);
-        double top = Math.min(y1, y2);
-
-        if (img == null) return;
-
-        double exportW = 1280;
-        double exportH = 720;
-
-        gc.save();
-        gc.beginPath();
-        if (circle) gc.arc(left + w/2, top + h/2, w/2, h/2, 0, 360);
-        else gc.rect(left, top, w, h);
-        gc.closePath();
-        gc.clip();
-
-        double zoomFactor = 2.0;
-        double centerX = left + w/2;
-        double centerY = top + h/2;
-
-        Affine transform = new Affine();
-        transform.appendTranslation(centerX, centerY);
-        transform.appendScale(zoomFactor, zoomFactor);
-        transform.appendTranslation(-centerX, -centerY);
-        gc.setTransform(transform);
-
-        gc.drawImage(img, 0, 0, exportW, exportH);
-
-        gc.restore();
-
-        gc.setStroke(c);
-        gc.setLineWidth(2.0 * sx);
-        if (circle) gc.strokeOval(left, top, w, h);
-        else gc.strokeRect(left, top, w, h);
+        canvasRenderer.drawShapeOnGC(gc, s, bg, x1, y1, x2, y2, size, sx, sy, offX, offY);
     }
 
     private void onTimelineDragged(MouseEvent e) {
@@ -2340,12 +2139,9 @@ public class EditorController {
 
                 saveState();
 
-                // --- CAMBIO AQUÍ ---
-                // Delegamos el cambio y el reajuste al Manager
                 timelineManager.modifySegmentDuration(selectedSegment, newDuration);
-                // -------------------
 
-                updateScrollbarAndRedraw(); // Actualiza scroll y repinta
+                updateScrollbarAndRedraw();
 
             } catch (NumberFormatException e) {
                 mostrarAlerta("Error", "Introduce un número válido.");
