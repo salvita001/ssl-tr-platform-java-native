@@ -382,7 +382,7 @@ public class EditorController {
         if (spinnerVideo != null) {
             spinnerVideo.setPrefSize(100, 100);
             spinnerVideo.setMaxSize(100, 100);
-            spinnerVideo.setStyle("-fx-progress-color: #FFD700; -fx-accent: #FFD700;");
+            spinnerVideo.setStyle("-fx-progress-color: rgba(0,140,255,0.71); -fx-accent: rgba(0,140,255,0.71);");
             spinnerVideo.setMouseTransparent(true); // El spinner en sí no bloquea clic
         }
         // Overlay Video (Este SÍ bloquea clics al estar visible)
@@ -394,7 +394,7 @@ public class EditorController {
         if (spinnerTimeline != null) {
             spinnerTimeline.setPrefSize(40, 40);
             spinnerTimeline.setMaxSize(40, 40);
-            spinnerTimeline.setStyle("-fx-progress-color: #FFD700; -fx-accent: #FFD700;");
+            spinnerTimeline.setStyle("-fx-progress-color: rgba(0,140,255,0.71); -fx-accent: rgba(0,140,255,0.71);");
             spinnerTimeline.setMouseTransparent(true);
         }
         // Overlay Timeline

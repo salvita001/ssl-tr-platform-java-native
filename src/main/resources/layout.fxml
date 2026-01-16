@@ -18,7 +18,7 @@
                 <StackPane fx:id="overlayVideo" visible="false"
                            style="-fx-background-color: rgba(0, 0, 0, 0.5); -fx-cursor: wait;" />
                 <ProgressIndicator fx:id="spinnerVideo" visible="false"
-                                   style="-fx-progress-color: #FFD700; -fx-accent: #FFD700;"
+                                   style="-fx-progress-color: rgba(0,140,255,0.71); -fx-accent: rgba(0,140,255,0.71);"
                                    prefHeight="100.0" prefWidth="100.0"/>
 
                 <VBox fx:id="placeholderView" alignment="CENTER" spacing="20" onMouseClicked="#onImportVideo" style="-fx-cursor: hand;">
@@ -166,7 +166,7 @@
                                 <StackPane fx:id="overlayTimeline" visible="false"
                                            style="-fx-background-color: rgba(0, 0, 0, 0.5); -fx-cursor: wait;" />
                                 <ProgressIndicator fx:id="spinnerTimeline" visible="false"
-                                                   style="-fx-progress-color: #FFD700; -fx-accent: #FFD700;"
+                                                   style="-fx-progress-color: rgba(0,140,255,0.71); -fx-accent: rgba(0,140,255,0.71)"
                                                    maxWidth="50.0" maxHeight="50.0"/>
                             </children>
                         </StackPane>
