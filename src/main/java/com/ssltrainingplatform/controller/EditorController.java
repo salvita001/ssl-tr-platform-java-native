@@ -172,6 +172,8 @@ public class EditorController {
     @FXML private StackPane overlayTimeline;
     @FXML private GridPane controlsGrid;
 
+    private DrawingShape textShapeBeingEdited = null;
+
     // =========================================================================
     //                               INICIALIZACIÓN
     // =========================================================================
@@ -209,7 +211,7 @@ public class EditorController {
         }
 
         if (colorPicker != null) {
-            colorPicker.setValue(Color.web("#7c3aed"));
+            colorPicker.setValue(Color.web("#f85d5d"));
             colorPicker.valueProperty().addListener((obs, oldVal, newVal) -> {
                 if (selectedShapeToMove != null) {
                     selectedShapeToMove.setColor(toHex(newVal));
@@ -655,6 +657,22 @@ public class EditorController {
         VideoSegment currentSeg = timelineManager.getSegmentAt(currentTimelineTime);
 
         if (currentTool == ToolType.CURSOR) {
+
+            // --- NUEVO: DOBLE CLIC PARA EDITAR TEXTO ---
+            if (e.getClickCount() == 2) {
+                for (int i = shapes.size() - 1; i >= 0; i--) {
+                    DrawingShape s = shapes.get(i);
+                    // Chequeo de clip ID...
+                    if (s.getClipId() != null && currentSeg != null && !s.getClipId().equals(currentSeg.getId())) continue;
+
+                    if (s.isHit(e.getX(), e.getY()) && "text".equals(s.getType())) {
+                        startEditingText(s, e.getX(), e.getY()); // <--- Método nuevo
+                        return;
+                    }
+                }
+            }
+            // -------------------------------------------
+
             if (selectedShapeToMove != null
                     && checkHandles(selectedShapeToMove, e.getX(), e.getY())) {
                 saveState();
@@ -869,6 +887,25 @@ public class EditorController {
                     pts.set(1, pts.get(1) + dy);
                 }
             }
+            // --- NUEVO: REDIMENSIONAR TEXTO (ESTIRAR) ---
+            else if (dragMode == 5 && "text".equals(selectedShapeToMove.getType())) {
+                // Calculamos vector desde el origen del texto (Arriba-Izq) al Ratón actual
+                double dxText = e.getX() - selectedShapeToMove.getStartX();
+                double dyText = e.getY() - selectedShapeToMove.getStartY();
+
+                // Evitamos valores negativos o cero
+                if (dxText < 10) dxText = 10;
+                if (dyText < 10) dyText = 10;
+
+                // Usamos la altura para definir el tamaño (es más intuitivo para texto)
+                // Dividimos por 2.5 porque en el renderer multiplicamos por 2.5
+                // Esto hace que el ratón siga perfectamente a la esquina del texto
+                double newSize = dyText / 2.5;
+
+                // Un mínimo de seguridad para que no desaparezca
+                selectedShapeToMove.setStrokeWidth(Math.max(5, newSize));
+            }
+            // --------------------------------------------
 
             redrawVideoCanvas();
         } else if (currentTool == ToolType.PEN && currentShape != null) {
@@ -882,6 +919,17 @@ public class EditorController {
 
         lastMouseX = e.getX();
         lastMouseY = e.getY();
+    }
+
+    private void startEditingText(DrawingShape s, double mouseX, double mouseY) {
+        this.textShapeBeingEdited = s; // Guardamos la referencia
+
+        // Preparamos el input flotante
+        showFloatingInput(mouseX, mouseY);
+
+        // Rellenamos con el texto actual
+        floatingInput.setText(s.getTextValue());
+        floatingInput.selectAll(); // Seleccionar todo para sobreescribir rápido
     }
 
     private void onCanvasReleased(MouseEvent e) {
@@ -908,17 +956,25 @@ public class EditorController {
         }
 
         if ("text".equals(s.getType())) {
+            // 1. Recalculamos dónde está la esquina inferior derecha
             Text temp = new Text(s.getTextValue());
+            // IMPORTANTE: Usar el mismo factor que en el renderer (2.5)
             temp.setFont(Font.font("Arial", FontWeight.BOLD, s.getStrokeWidth() * 2.5));
+
             double w = temp.getLayoutBounds().getWidth();
             double h = temp.getLayoutBounds().getHeight();
-            double resizeX = s.getStartX() + w;
-            double resizeY = s.getStartY() + h;
 
-            if (Math.abs(mx - resizeX) < dist && Math.abs(my - resizeY) < dist) {
-                dragMode = 5;
+            // La posición del "handle" es Inicio + Ancho/Alto
+            double handleX = s.getStartX() + w;
+            double handleY = s.getStartY() + h;
+
+            // 2. Comprobamos si el ratón está cerca de esa esquina
+            if (Math.abs(mx - handleX) < dist && Math.abs(my - handleY) < dist) {
+                dragMode = 5; // Modo "Estirar Texto"
                 return true;
             }
+
+            // Si no pinchamos en la esquina, devolvemos false (así el drag normal moverá el texto)
             return false;
         }
 
@@ -1026,35 +1082,54 @@ public class EditorController {
     private void showFloatingInput(double x, double y) {
         if (floatingInput == null) return;
 
+        // Si llamamos a esto directamente (desde la herramienta Texto), limpiamos la edición
+        if (currentTool == ToolType.TEXT) {
+            this.textShapeBeingEdited = null;
+            floatingInput.setText("");
+        }
+
         floatingInput.setTranslateX(x - (drawCanvas.getWidth() / 2) + 100);
         floatingInput.setTranslateY(y - (drawCanvas.getHeight() / 2));
-
-        // Mostrar y dar foco para escribir
         floatingInput.setVisible(true);
-        floatingInput.setText("");
         floatingInput.requestFocus();
 
-        // Guardamos la posición exacta X,Y para usarla al confirmar
+        // Guardamos posición por si es nuevo
         floatingInput.setUserData(new double[]{x, y});
     }
 
     private void confirmFloatingText() {
         if (!floatingInput.isVisible()) return;
-        double[] pos = (double[]) floatingInput.getUserData();
+
         String text = floatingInput.getText();
-        Color c = colorPicker.getValue();
+
         if (!text.isEmpty()) {
-            saveState();
-            DrawingShape txtShape = new DrawingShape("t" + System.currentTimeMillis(), "text", pos[0], pos[1],
-                    toHex(c));
-            VideoSegment activeSeg = timelineManager.getSegmentAt(currentTimelineTime);
-            if (activeSeg != null) {
-                txtShape.setClipId(activeSeg.getId());
+            saveState(); // Guardamos historia para Undo
+
+            if (textShapeBeingEdited != null) {
+                // CASO 1: EDITAR EXISTENTE
+                textShapeBeingEdited.setTextValue(text);
+                // Opcional: Actualizar color también si quieres
+                // textShapeBeingEdited.setColor(toHex(colorPicker.getValue()));
+                textShapeBeingEdited = null; // Reset
+            } else {
+                // CASO 2: CREAR NUEVO (Tu lógica anterior)
+                double[] pos = (double[]) floatingInput.getUserData();
+                Color c = colorPicker.getValue();
+                DrawingShape txtShape = new DrawingShape("t" + System.currentTimeMillis(), "text", pos[0], pos[1], toHex(c));
+
+                VideoSegment activeSeg = timelineManager.getSegmentAt(currentTimelineTime);
+                if (activeSeg != null) {
+                    txtShape.setClipId(activeSeg.getId());
+                }
+
+                txtShape.setTextValue(text);
+                // Tamaño por defecto o el del slider
+                txtShape.setStrokeWidth(currentStrokeWidth);
+                shapes.add(txtShape);
+                switchToCursorAndSelect(txtShape);
             }
-            txtShape.setTextValue(text);
-            shapes.add(txtShape);
-            switchToCursorAndSelect(txtShape);
         }
+
         floatingInput.setVisible(false);
         redrawVideoCanvas();
     }
@@ -2034,7 +2109,7 @@ public class EditorController {
 
         double size = s.getStrokeWidth() * sx;
 
-        canvasRenderer.drawShapeOnGC(gc, s, bg, x1, y1, x2, y2, size, sx, sy, offX, offY);
+        canvasRenderer.drawShapeOnGC(gc, s, bg, x1, y1, x2, y2, size, sx, sy, offX, offY, exportW, exportH);
     }
 
     private void onTimelineDragged(MouseEvent e) {

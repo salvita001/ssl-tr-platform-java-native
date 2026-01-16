@@ -20,7 +20,6 @@ public class LocalExportService {
     private final FFprobe ffprobe;
 
     public LocalExportService() throws IOException {
-        // ✅ CAMBIO: Usamos el Locator dinámico
         String ffmpegPath = FFmpegLocator.getFFmpegPath();
         String ffprobePath = FFmpegLocator.getFFprobePath();
 
@@ -39,39 +38,33 @@ public class LocalExportService {
         try {
             int index = 0;
             for (ExportJobSegment seg : segments) {
-                String tempName = new File(tempDir, "part_" + String.format("%03d", index++) + ".mp4").getAbsolutePath();
-
+                // CAMBIO 1: Usamos extensión .ts (Transport Stream) para evitar errores de unión
+                String tempName = new File(tempDir, "part_" + String.format("%03d", index++) + ".ts").getAbsolutePath();
                 FFmpegBuilder builder = new FFmpegBuilder().overrideOutputFiles(true);
 
                 if (seg.isFreezeFrame) {
-                    // --- CASO 1: IMAGEN CONGELADA (DIBUJO) ---
-                    // Añadimos pista de audio muda para evitar cortes de sonido al unir
+                    // --- CASO 1: IMAGEN CONGELADA ---
                     builder.setInput(seg.imagePath)
                             .addExtraArgs("-f", "lavfi")
                             .addExtraArgs("-i", "anullsrc=channel_layout=stereo:sample_rate=44100")
                             .addOutput(tempName)
+                            .setVideoFilter("loop=loop=-1:size=1:start=0")
                             .setDuration((long) (seg.duration * 1000), TimeUnit.MILLISECONDS)
                             .setVideoCodec("libx264")
-                            .setAudioCodec("aac") // Importante: Codec de audio
+                            .setAudioCodec("aac")
                             .setAudioSampleRate(44100)
                             .setVideoFrameRate(30)
                             .setVideoResolution(1280, 720)
                             .addExtraArgs("-pix_fmt", "yuv420p")
-                            .addExtraArgs("-shortest") // Cortar cuando acabe la imagen
+                            // CAMBIO 2: Filtros necesarios para formato TS
+                            .addExtraArgs("-bsf:v", "h264_mp4toannexb")
+                            .addExtraArgs("-f", "mpegts")
                             .done();
                 } else {
-                    // --- CASO 2: VIDEO EN MOVIMIENTO (CORREGIDO) ---
-
-                    // ✅ CAMBIO 1: No usamos addExtraArgs("-ss") antes del input.
-                    // Esto fuerza a FFmpeg a leer el archivo de forma segura.
-
+                    // --- CASO 2: VIDEO ---
                     builder.setInput(sourceVideoPath)
                             .addOutput(tempName)
-
-                            // ✅ CAMBIO 2: Ponemos el Seek (StartOffset) AQUÍ, en la salida.
-                            // Esto activa el "Output Seeking" (lento pero seguro).
                             .setStartOffset((long) (seg.startSource * 1000), TimeUnit.MILLISECONDS)
-
                             .setDuration((long) ((seg.endSource - seg.startSource) * 1000), TimeUnit.MILLISECONDS)
                             .setVideoCodec("libx264")
                             .setAudioCodec("aac")
@@ -79,10 +72,10 @@ public class LocalExportService {
                             .setVideoFrameRate(30)
                             .setVideoResolution(1280, 720)
                             .addExtraArgs("-pix_fmt", "yuv420p")
-
-                            // ✅ CAMBIO 3: Filtro de seguridad para video corrupto
-                            // Si encuentra un frame roto, lo ignora en lugar de fallar
                             .addExtraArgs("-err_detect", "ignore_err")
+                            // CAMBIO 2: Filtros necesarios para formato TS
+                            .addExtraArgs("-bsf:v", "h264_mp4toannexb")
+                            .addExtraArgs("-f", "mpegts")
                             .done();
                 }
 
@@ -91,7 +84,7 @@ public class LocalExportService {
                 tempFiles.add(tempName);
             }
 
-            // 2. CONCATENAR
+            // 2. CONCATENAR (Ahora une archivos .ts que son mucho más estables)
             File listFile = new File(tempDir, "list.txt");
             try (FileWriter writer = new FileWriter(listFile)) {
                 for (String path : tempFiles) {
@@ -104,27 +97,26 @@ public class LocalExportService {
                     .addExtraArgs("-f", "concat")
                     .addExtraArgs("-safe", "0")
                     .addOutput(outputFile.getAbsolutePath())
-                    .setVideoCodec("copy")
-                    .setAudioCodec("copy") // Copiar también el audio sin recodificar
+                    .setVideoCodec("libx264")  // Recodificamos para generar el MP4 final limpio
+                    .setAudioCodec("aac")
+                    .setPreset("fast")
                     .done();
 
-            System.out.println("Uniendo archivo final...");
+            System.out.println("Uniendo archivo final (recodificando desde TS)...");
             executor.createJob(concatBuilder).run();
 
         } finally {
-            // tempDir.delete(); // Descomenta esto en producción
+            // tempDir.delete();
         }
     }
 
-    // Clase auxiliar simple (DTO) para pasar datos del Controller al Service
     public static class ExportJobSegment {
         boolean isFreezeFrame;
         double startSource;
         double endSource;
         double duration;
-        String imagePath; // Ruta al PNG temporal si es freeze
+        String imagePath;
 
-        // Constructor para Video
         public static ExportJobSegment video(double start, double end) {
             ExportJobSegment s = new ExportJobSegment();
             s.isFreezeFrame = false;
@@ -133,7 +125,6 @@ public class LocalExportService {
             return s;
         }
 
-        // Constructor para Freeze
         public static ExportJobSegment freeze(String imgPath, double duration) {
             ExportJobSegment s = new ExportJobSegment();
             s.isFreezeFrame = true;
