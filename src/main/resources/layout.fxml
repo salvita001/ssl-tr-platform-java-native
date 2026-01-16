@@ -15,6 +15,11 @@
             <children>
                 <ImageView fx:id="videoView" preserveRatio="true" />
                 <Canvas fx:id="drawCanvas" />
+                <StackPane fx:id="overlayVideo" visible="false"
+                           style="-fx-background-color: rgba(0, 0, 0, 0.5); -fx-cursor: wait;" />
+                <ProgressIndicator fx:id="spinnerVideo" visible="false"
+                                   style="-fx-progress-color: #FFD700; -fx-accent: #FFD700;"
+                                   prefHeight="100.0" prefWidth="100.0"/>
 
                 <VBox fx:id="placeholderView" alignment="CENTER" spacing="20" onMouseClicked="#onImportVideo" style="-fx-cursor: hand;">
                     <children>
@@ -113,7 +118,7 @@
         <VBox spacing="10" style="-fx-padding: 10 20 20 20;">
             <children>
 
-                <GridPane styleClass="bottom-bar-container">
+                <GridPane fx:id="controlsGrid" styleClass="bottom-bar-container">
                     <columnConstraints>
                         <ColumnConstraints hgrow="ALWAYS" minWidth="10.0" percentWidth="40.0" halignment="LEFT" />
                         <ColumnConstraints hgrow="NEVER" minWidth="10.0" percentWidth="20.0" halignment="CENTER" />
@@ -158,7 +163,11 @@
                         <StackPane alignment="CENTER">
                             <children>
                                 <Canvas fx:id="timelineCanvas" height="100.0" width="1200.0" />
-                                <ProgressIndicator fx:id="loadingSpinner" visible="false" maxWidth="40" />
+                                <StackPane fx:id="overlayTimeline" visible="false"
+                                           style="-fx-background-color: rgba(0, 0, 0, 0.5); -fx-cursor: wait;" />
+                                <ProgressIndicator fx:id="spinnerTimeline" visible="false"
+                                                   style="-fx-progress-color: #FFD700; -fx-accent: #FFD700;"
+                                                   maxWidth="50.0" maxHeight="50.0"/>
                             </children>
                         </StackPane>
                         <ScrollBar fx:id="timelineScroll" orientation="HORIZONTAL" visible="false" managed="false" />

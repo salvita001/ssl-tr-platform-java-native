@@ -23,6 +23,7 @@ import javafx.scene.image.WritableImage;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
+import javafx.scene.layout.GridPane;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
@@ -69,7 +70,6 @@ public class EditorController {
     @FXML private ColorPicker colorPicker;
     @FXML private Slider sizeSlider;
     @FXML private Slider zoomSlider;
-    @FXML private ProgressIndicator loadingSpinner;
     @FXML private Button btnSkipStart;
     @FXML private Button btnSkipEnd;
     @FXML private Button btnPlayPause;
@@ -82,15 +82,10 @@ public class EditorController {
     private VideoApiClient apiClient = new VideoApiClient();
     private String serverVideoId = null; // Aquí guardaremos el ID que nos da el backen
 
-    // --- ESTADO ---
-    private List<VideoSegment> segments = new ArrayList<>();
-
     private VideoSegment selectedSegment = null;
 
     private double currentTimelineTime = 0.0;
     private double currentRealVideoTime = 0.0;
-    private double totalTimelineDuration = 0.0;
-    private double totalOriginalDuration = 0.0;
     private double pixelsPerSecond = 50.0;
 
     private AnimationTimer freezeTimer;
@@ -168,6 +163,14 @@ public class EditorController {
     private CanvasRenderer canvasRenderer;
 
     private TimelineManager timelineManager = new TimelineManager();
+
+    @FXML private ProgressIndicator spinnerVideo;
+    @FXML private ProgressIndicator spinnerTimeline;
+
+    // --- VARIABLES DE BLOQUEO ---
+    @FXML private StackPane overlayVideo;
+    @FXML private StackPane overlayTimeline;
+    @FXML private GridPane controlsGrid;
 
     // =========================================================================
     //                               INICIALIZACIÓN
@@ -372,6 +375,51 @@ public class EditorController {
             hoverTime = -1;
             redrawTimeline();
         });
+
+        // --- CONFIGURACIÓN DE LOS SPINNERS Y BLOQUEOS ---
+
+        // Spinner Video
+        if (spinnerVideo != null) {
+            spinnerVideo.setPrefSize(100, 100);
+            spinnerVideo.setMaxSize(100, 100);
+            spinnerVideo.setStyle("-fx-progress-color: #FFD700; -fx-accent: #FFD700;");
+            spinnerVideo.setMouseTransparent(true); // El spinner en sí no bloquea clic
+        }
+        // Overlay Video (Este SÍ bloquea clics al estar visible)
+        if (overlayVideo != null) {
+            overlayVideo.setVisible(false);
+        }
+
+        // Spinner Timeline
+        if (spinnerTimeline != null) {
+            spinnerTimeline.setPrefSize(40, 40);
+            spinnerTimeline.setMaxSize(40, 40);
+            spinnerTimeline.setStyle("-fx-progress-color: #FFD700; -fx-accent: #FFD700;");
+            spinnerTimeline.setMouseTransparent(true);
+        }
+        // Overlay Timeline
+        if (overlayTimeline != null) {
+            overlayTimeline.setVisible(false);
+        }
+
+        // Empezamos ocultos
+        setLoading(false);
+
+    }
+
+    private void setLoading(boolean isLoading) {
+        // 1. SPINNER Y OVERLAY VIDEO
+        if (spinnerVideo != null) spinnerVideo.setVisible(isLoading);
+        if (overlayVideo != null) overlayVideo.setVisible(isLoading);
+
+        // 2. SPINNER Y OVERLAY TIMELINE
+        if (spinnerTimeline != null) spinnerTimeline.setVisible(isLoading);
+        if (overlayTimeline != null) overlayTimeline.setVisible(isLoading);
+
+        // 3. BLOQUEAR LOS BOTONES (Play, Exportar, etc.)
+        if (controlsGrid != null) {
+            controlsGrid.setDisable(isLoading);
+        }
     }
 
     private void updateSize(double newSize) {
@@ -399,7 +447,7 @@ public class EditorController {
 
         // A. BUSCAR QUÉ SEGMENTO SE HA PINCHADO
         VideoSegment clickedSeg = null;
-        for (VideoSegment seg : segments) {
+        for (VideoSegment seg : timelineManager.getSegments()) {
             if (clickTime >= seg.getStartTime() && clickTime <= seg.getEndTime()) {
                 clickedSeg = seg;
                 break;
@@ -440,18 +488,8 @@ public class EditorController {
 
     private void onTimelineReleased(MouseEvent e) {
         if (isDraggingTimeline && segmentBeingDragged != null) {
-            // 1. Extraer el segmento
-            segments.remove(segmentBeingDragged);
 
-            // 2. Insertar en el hueco detectado por la línea amarilla
-            if (dropIndex >= 0 && dropIndex <= segments.size()) {
-                segments.add(dropIndex, segmentBeingDragged);
-            } else {
-                segments.add(segmentBeingDragged);
-            }
-
-            // 3. Recalcular tiempos (esto ahora fijará el clip en su nueva posición)
-            recalculateSegmentTimes();
+            timelineManager.moveSegment(segmentBeingDragged, dropIndex);
 
             // 4. Limpiar variables
             isDraggingTimeline = false;
@@ -615,7 +653,7 @@ public class EditorController {
             lastMouseY = e.getY();
             dragMode = 0;
 
-            VideoSegment currentSeg = getCurrentSegment();
+            VideoSegment currentSeg = timelineManager.getSegmentAt(currentTimelineTime);
 
             if (currentTool == ToolType.CURSOR) {
                 if (selectedShapeToMove != null
@@ -648,7 +686,7 @@ public class EditorController {
             }
 
             if (currentTool == ToolType.TRACKING) {
-                VideoSegment currentSegTrack = getCurrentSegment();
+                VideoSegment currentSegTrack = timelineManager.getSegmentAt(currentTimelineTime);
                 if (currentSegTrack == null) return;
 
                 if (currentDetections.isEmpty()) {
@@ -700,17 +738,14 @@ public class EditorController {
                 return;
             }
 
-            // ---------------------------------------------------------
-            // AUTO-CONGELADO INTELIGENTE
-            // ---------------------------------------------------------
             if (currentSeg != null && !currentSeg.isFreezeFrame()) {
                 if (videoService.isPlaying()) {
                     videoService.pause();
                     btnPlayPause.setText("▶");
                 }
                 saveState();
-                insertFreezeFrame(3.0);
-                currentSeg = getCurrentSegment();
+                timelineManager.insertFreezeFrame(currentTimelineTime, 3.0, videoView.getImage());
+                currentSeg = timelineManager.getSegmentAt(currentTimelineTime);
             }
 
             // ---------------------------------------------------------
@@ -749,7 +784,8 @@ public class EditorController {
 
                 if (currentShape == null || !"polygon".equals(currentShape.getType())) {
                     saveState();
-                    currentShape = new DrawingShape("p"+System.currentTimeMillis(), "polygon", e.getX(), e.getY(), toHex(c));
+                    currentShape = new DrawingShape("p" + System.currentTimeMillis(),
+                            "polygon", e.getX(), e.getY(), toHex(c));
 
                     if (currentSeg != null) currentShape.setClipId(currentSeg.getId());
 
@@ -785,7 +821,7 @@ public class EditorController {
 
             saveState();
 
-            currentShape = new DrawingShape("s"+System.currentTimeMillis(), type, e.getX(), e.getY(), toHex(c));
+            currentShape = new DrawingShape("s" + System.currentTimeMillis(), type, e.getX(), e.getY(), toHex(c));
 
             if (currentSeg != null) currentShape.setClipId(currentSeg.getId());
             currentShape.setStrokeWidth(s);
@@ -802,7 +838,6 @@ public class EditorController {
 
             if (currentTool == ToolType.CURSOR && selectedShapeToMove != null) {
 
-                // Mover toda la forma
                 if (dragMode == 1) {
                     selectedShapeToMove.move(dx, dy);
                 } else if (dragMode == 2) {
@@ -840,7 +875,6 @@ public class EditorController {
         });
 
         drawCanvas.setOnMouseReleased(e -> {
-            // Al soltar, finalizamos cualquier forma (excepto Polígono que sigue vivo)
             if (currentTool != ToolType.POLYGON && currentShape != null) {
                 switchToCursorAndSelect(currentShape);
                 currentShape = null;
@@ -911,7 +945,7 @@ public class EditorController {
         gcDraw.clearRect(0, 0, drawCanvas.getWidth(), drawCanvas.getHeight());
 
         // 1. Identificar el segmento bajo el playhead
-        VideoSegment activeSeg = getCurrentSegment();
+        VideoSegment activeSeg = timelineManager.getSegmentAt(currentTimelineTime);
 
         Image vidImg = (activeSeg != null && activeSeg.isFreezeFrame() && activeSeg.getThumbnail() != null)
                 ? activeSeg.getThumbnail()
@@ -930,7 +964,8 @@ public class EditorController {
         gcDraw.drawImage(vidImg, offX, offY, vidDispW, vidDispH);
 
         // IA: Solo dibujamos los cuadros de detección si la herramienta de Tracking está activa
-        if (btnToggleAI.isSelected() && currentTool == ToolType.TRACKING && !videoService.isPlaying() && currentDetections != null) {
+        if (btnToggleAI.isSelected() && currentTool == ToolType.TRACKING && !videoService.isPlaying()
+                && currentDetections != null) {
             gcDraw.setLineWidth(1.5);
             for (var obj : currentDetections) {
                 if (obj.getClassName().equals("person")) {
@@ -946,7 +981,6 @@ public class EditorController {
 
         String activeSegId = (activeSeg != null) ? activeSeg.getId() : null;
 
-        // Combinar dibujos en vivo con los de la caché
         List<DrawingShape> cachedShapes = (activeSegId != null) ? annotationsCache.get(activeSegId) : null;
         List<DrawingShape> allToDraw = new ArrayList<>(shapes);
         if (cachedShapes != null) {
@@ -994,6 +1028,7 @@ public class EditorController {
         // Guardamos la posición exacta X,Y para usarla al confirmar
         floatingInput.setUserData(new double[]{x, y});
     }
+
     private void confirmFloatingText() {
         if (!floatingInput.isVisible()) return;
         double[] pos = (double[]) floatingInput.getUserData();
@@ -1001,10 +1036,11 @@ public class EditorController {
         Color c = colorPicker.getValue();
         if (!text.isEmpty()) {
             saveState();
-            DrawingShape txtShape = new DrawingShape("t"+System.currentTimeMillis(),
-                    "text", pos[0], pos[1], toHex(c));
-            if (getCurrentSegment() != null) {
-                txtShape.setClipId(getCurrentSegment().getId());
+            DrawingShape txtShape = new DrawingShape("t" + System.currentTimeMillis(), "text", pos[0], pos[1],
+                    toHex(c));
+            VideoSegment activeSeg = timelineManager.getSegmentAt(currentTimelineTime);
+            if (activeSeg != null) {
+                txtShape.setClipId(activeSeg.getId());
             }
             txtShape.setTextValue(text);
             shapes.add(txtShape);
@@ -1037,7 +1073,7 @@ public class EditorController {
                     redrawTimeline();
                     redrawVideoCanvas();
 
-                    VideoSegment current = getCurrentSegment();
+                    VideoSegment current = timelineManager.getSegmentAt(currentTimelineTime);
                     if (current == null || !current.isFreezeFrame()) {
                         checkPlaybackJump();
                     }
@@ -1049,15 +1085,15 @@ public class EditorController {
     private void setupVideoEvents() {
         videoService.setOnProgressUpdate(percent -> {
             if (System.currentTimeMillis() < ignoreUpdatesUntil) return;
-
             if (isPlayingFreeze) return;
-
             if (!videoService.isPlaying()) return;
 
-            if (totalOriginalDuration > 0) {
-                currentRealVideoTime = (percent / 100.0) * totalOriginalDuration;
+            double totalOrgDur = timelineManager.getTotalOriginalDuration();
 
-                VideoSegment expectedSeg = getCurrentSegment();
+            if (totalOrgDur > 0) {
+                currentRealVideoTime = (percent / 100.0) * totalOrgDur;
+
+                VideoSegment expectedSeg = timelineManager.getSegmentAt(currentTimelineTime);
 
                 if (expectedSeg != null && expectedSeg.isFreezeFrame()) {
                     checkPlaybackJump();
@@ -1073,7 +1109,7 @@ public class EditorController {
 
                     if (drift > 0.25) {
                         System.out.println("Corrección de desfase: " + drift + "s. Sincronizando...");
-                        performSafeSeek((expectedRealTime / totalOriginalDuration) * 100.0);
+                        performSafeSeek((expectedRealTime / totalOrgDur) * 100.0);
                     } else {
                         currentTimelineTime = expectedSeg.getStartTime() +
                                 (currentRealVideoTime - expectedSeg.getSourceStartTime());
@@ -1096,13 +1132,9 @@ public class EditorController {
             }
         });
 
-        // Configuración de IA y Frames (se mantiene igual)
         videoService.setOnFrameCaptured(bufferedImage -> {
-            // Incrementar el contador de frames
             int currentFrame = frameCounter.incrementAndGet();
-            // Ejemplo: Solo procesar IA cada 3 frames para no saturar
             if (currentFrame % 2 != 0) return;
-
             if (!btnToggleAI.isSelected() || isProcessingAI.get()) return;
 
             isProcessingAI.set(true);
@@ -1112,9 +1144,8 @@ public class EditorController {
 
                     Platform.runLater(() -> {
                         this.currentDetections = results;
-                        VideoSegment activeSeg = getCurrentSegment();
+                        VideoSegment activeSeg = timelineManager.getSegmentAt(currentTimelineTime);
 
-                        // 1. RE-CONEXIÓN AUTOMÁTICA
                         if (trackingShape == null && activeSeg != null && videoService.isPlaying()) {
                             for (DrawingShape s : shapes) {
                                 if ("tracking".equals(s.getType()) && activeSeg.getId().equals(s.getClipId())) {
@@ -1124,7 +1155,6 @@ public class EditorController {
                             }
                         }
 
-                        // 2. ACTUALIZACIÓN DE POSICIÓN
                         if (trackingShape != null && videoService.isPlaying()) {
                             if (activeSeg == null || !activeSeg.getId().equals(trackingShape.getClipId())) {
                                 trackingShape = null;
@@ -1134,7 +1164,6 @@ public class EditorController {
                             Image img = videoView.getImage();
                             if (img == null) return;
 
-                            // Cálculo de escala y márgenes para precisión milimétrica
                             double sc = Math.min(drawCanvas.getWidth() / img.getWidth(), drawCanvas.getHeight() / img.getHeight());
                             double vDW = img.getWidth() * sc; double vDH = img.getHeight() * sc;
                             double oX = (drawCanvas.getWidth() - vDW) / 2.0; double oY = (drawCanvas.getHeight() - vDH) / 2.0;
@@ -1145,11 +1174,10 @@ public class EditorController {
                             for (var obj : results) {
                                 if (obj.getClassName().equals("person")) {
                                     var r = obj.getBoundingBox().getBounds();
-                                    // Coordenadas reales mapeadas al video
                                     double nx = ((r.getX() + r.getWidth()/2.0) / 640.0) * vDW + oX;
                                     double ny = ((r.getY() + r.getHeight()) / 640.0) * vDH + oY;
-
-                                    double d = Math.sqrt(Math.pow(trackingShape.getEndX() - nx, 2) + Math.pow(trackingShape.getEndY() - ny, 2));
+                                    double d = Math.sqrt(Math.pow(trackingShape.getEndX() - nx, 2)
+                                            + Math.pow(trackingShape.getEndY() - ny, 2));
                                     if (d < dMin) { dMin = d; closest = obj; }
                                 }
                             }
@@ -1176,27 +1204,33 @@ public class EditorController {
         resetTracking();
         autoSaveActiveSegmentDrawings();
 
-        int nextIndex = (currentSeg != null) ? segments.indexOf(currentSeg) + 1 : getNextSegmentIndexByTime();
+        // 1. Delegamos la búsqueda al Manager
+        VideoSegment nextSeg = timelineManager.getNextSegment(currentSeg, currentTimelineTime);
 
-        if (nextIndex < segments.size()) {
-            VideoSegment nextSeg = segments.get(nextIndex);
+        if (nextSeg != null) {
+            // --- CASO: HAY SIGUIENTE CLIP ---
             currentTimelineTime = nextSeg.getStartTime();
 
-            double seekPercent = (nextSeg.getSourceStartTime() / totalOriginalDuration) * 100.0;
+            // Usamos la duración original desde el Manager
+            double totalOrg = timelineManager.getTotalOriginalDuration();
+
+            double seekPercent = (nextSeg.getSourceStartTime() / totalOrg) * 100.0;
             performSafeSeek(seekPercent);
 
             checkPlaybackJump();
         } else {
+            // --- CASO: FIN DEL TIMELINE ---
             Platform.runLater(() -> {
                 if (videoService.isPlaying()) onPlayPause();
-                currentTimelineTime = totalTimelineDuration;
+                // Usamos la duración total desde el Manager
+                currentTimelineTime = timelineManager.getTotalDuration();
                 redrawTimeline();
             });
         }
     }
 
     private void checkAutoScroll() {
-        if (totalTimelineDuration <= 0) return;
+        if (timelineManager.getTotalDuration() <= 0) return;
         double w = timelineCanvas.getWidth();
         double playheadPos = (currentTimelineTime * pixelsPerSecond) - timelineScroll.getValue();
         if (playheadPos > w) {
@@ -1207,7 +1241,7 @@ public class EditorController {
     }
 
     private void checkPlaybackJump() {
-        VideoSegment currentSeg = getCurrentSegment();
+        VideoSegment currentSeg = timelineManager.getSegmentAt(currentTimelineTime);
 
         if (currentSeg != null && currentSeg.isFreezeFrame()) {
             if (!isPlayingFreeze) {
@@ -1232,163 +1266,80 @@ public class EditorController {
         }
     }
 
-    @FXML public void onCaptureFrame() {
-        if (segments.isEmpty()) return;
+    @FXML
+    public void onCaptureFrame() {
+        // 1. Consultamos al manager si la lista está vacía
+        if (timelineManager.getSegments().isEmpty()) return;
+
         if (videoService.isPlaying()) onPlayPause();
+
         TextInputDialog dialog = new TextInputDialog("3");
         dialog.setTitle("Capturar Frame");
         dialog.setHeaderText("Congelar imagen");
         dialog.setContentText("Duración en segundos:");
+
         Optional<String> result = dialog.showAndWait();
         if (result.isPresent()) {
             try {
                 double duration = Double.parseDouble(result.get());
                 if (duration <= 0) return;
-                insertFreezeFrame(duration);
+
+                saveState(); // Guardamos estado para Undo
+
+                timelineManager.insertFreezeFrame(currentTimelineTime, duration, videoView.getImage());
+
+                // 3. Actualizamos la UI porque los datos han cambiado
+                updateScrollbarAndRedraw();
+                redrawVideoCanvas();
+
             } catch (NumberFormatException e) {}
-        }
-    }
-
-    private void insertFreezeFrame(double duration) {
-        saveState();
-        double gap = 0.05;
-
-        VideoSegment activeSeg = null;
-        for (VideoSegment seg : segments) {
-            if (currentTimelineTime >= seg.getStartTime() && currentTimelineTime < seg.getEndTime()) {
-                activeSeg = seg;
-                break;
-            }
-        }
-
-        if (activeSeg != null) {
-            double splitTimeTimeline = currentTimelineTime;
-            double splitTimeSource = activeSeg.getSourceStartTime() + (currentTimelineTime - activeSeg.getStartTime());
-            double originalEndTimeTimeline = activeSeg.getEndTime();
-            double originalEndTimeSource = activeSeg.getSourceEndTime();
-
-            activeSeg.setEndTime(splitTimeTimeline);
-            activeSeg.setSourceEndTime(splitTimeSource);
-
-            VideoSegment freezeSeg = new VideoSegment(
-                    splitTimeTimeline + gap,
-                    splitTimeTimeline + gap + duration,
-                    splitTimeSource, splitTimeSource, "#00bcd4", true
-            );
-
-            if (videoView.getImage() != null) freezeSeg.setThumbnail(videoView.getImage());
-
-            String colorRight = activeSeg.getColor().equals("#3b82f6") ? "#10b981" : "#3b82f6";
-            VideoSegment rightSeg = new VideoSegment(
-                    freezeSeg.getEndTime() + gap,
-                    originalEndTimeTimeline + duration + (2 * gap),
-                    splitTimeSource, originalEndTimeSource, colorRight, false
-            );
-
-            int idx = segments.indexOf(activeSeg);
-            segments.add(idx + 1, freezeSeg);
-            segments.add(idx + 2, rightSeg);
-
-            double totalShift = duration + (2 * gap);
-            for (int i = idx + 3; i < segments.size(); i++) {
-                VideoSegment s = segments.get(i);
-                s.setStartTime(s.getStartTime() + totalShift);
-                s.setEndTime(s.getEndTime() + totalShift);
-            }
-
-            totalTimelineDuration += totalShift;
-            updateScrollbarAndRedraw();
         }
     }
 
     @FXML
     public void onCutVideo() {
+        // 1. Guardar estado para poder deshacer (Undo)
         saveState();
-        if (segments.isEmpty()) return;
-        VideoSegment activeSegment = null;
 
-        for (VideoSegment seg : segments) {
-            if (currentTimelineTime >= seg.getStartTime() && currentTimelineTime < seg.getEndTime()) {
-                activeSegment = seg; break;
-            }
-        }
+        // 2. Delegar toda la matemática al Manager
+        // Le pasamos: Tiempo actual y la Imagen actual (para la miniatura del nuevo trozo)
+        boolean cutPerformed = timelineManager.cutVideo(currentTimelineTime, videoView.getImage());
 
-        if (activeSegment != null) {
-            if (activeSegment.isFreezeFrame()) return;
+        // 3. Solo si hubo un corte real, actualizamos la interfaz
+        if (cutPerformed) {
+            // Deseleccionamos para evitar errores visuales (o podrías buscar el nuevo segmento si quisieras)
+            selectedSegment = null;
 
-            double offset = currentTimelineTime - activeSegment.getStartTime();
-
-            // Evitar cortes muy cerca de los bordes
-            if (offset < 0.5 || (activeSegment.getEndTime() - currentTimelineTime) < 0.5) return;
-
-            double oldSourceEnd = activeSegment.getSourceEndTime();
-            double oldTimelineEnd = activeSegment.getEndTime();
-            double cutPointSource = activeSegment.getSourceStartTime() + offset;
-
-            activeSegment.setEndTime(currentTimelineTime);
-            activeSegment.setSourceEndTime(cutPointSource);
-
-            double gap = 0.05;
-            double newStartTime = currentTimelineTime + gap;
-            double newDuration = oldTimelineEnd - currentTimelineTime;
-
-            String newColor = activeSegment.getColor().equals("#3b82f6") ? "#10b981" : "#3b82f6";
-
-            VideoSegment newSegment = new VideoSegment(
-                    newStartTime,
-                    newStartTime + newDuration,
-                    cutPointSource,
-                    oldSourceEnd,
-                    newColor,
-                    false
-            );
-
-            if (videoView.getImage() != null) {
-                newSegment.setThumbnail(videoView.getImage());
-            }
-
-            int idx = segments.indexOf(activeSegment);
-            segments.add(idx + 1, newSegment);
-
-            for(int i = idx + 2; i < segments.size(); i++) {
-                VideoSegment s = segments.get(i);
-                s.setStartTime(s.getStartTime() + gap);
-                s.setEndTime(s.getEndTime() + gap);
-            }
-
-            totalTimelineDuration += gap;
-
-            selectedSegment = newSegment;
+            // Redibujamos el timeline
             updateScrollbarAndRedraw();
         }
     }
 
-    @FXML
-    public void onDeleteSegment() {
+    @FXML public void onDeleteSegment() {
         saveState();
-        if (selectedSegment == null) selectSegmentUnderPlayhead();
-        if (selectedSegment != null && segments.size() > 1) {
-            int idx = segments.indexOf(selectedSegment);
-            double delDur = selectedSegment.getDuration();
-            segments.remove(selectedSegment);
-            for (int i = idx; i < segments.size(); i++) {
-                VideoSegment s = segments.get(i);
-                s.setStartTime(s.getStartTime() - delDur);
-                s.setEndTime(s.getEndTime() - delDur);
-            }
-            totalTimelineDuration -= delDur;
+
+        // 1. Lógica de selección inteligente (UI)
+        // Si no hay nada seleccionado, intentamos borrar lo que está bajo el cabezal
+        if (selectedSegment == null) {
+            // Usamos el método del manager en lugar de selectSegmentUnderPlayhead()
+            selectedSegment = timelineManager.getSegmentAt(currentTimelineTime);
+        }
+
+        // 2. Delegamos el borrado al Manager
+        boolean wasDeleted = timelineManager.deleteSegment(selectedSegment);
+
+        if (wasDeleted) {
+            // 3. Actualizamos UI solo si hubo borrado real
             selectedSegment = null;
             updateScrollbarAndRedraw();
-            if (currentTimelineTime > totalTimelineDuration) currentTimelineTime = totalTimelineDuration - 0.1;
-        }
-    }
 
-    private void selectSegmentUnderPlayhead() {
-        for (VideoSegment seg : segments) {
-            if (currentTimelineTime >= seg.getStartTime() && currentTimelineTime < seg.getEndTime()) {
-                selectedSegment = seg;
-                break;
+            // 4. Corregir cabezal si se ha quedado fuera del video (por estar al final)
+            double totalDur = timelineManager.getTotalDuration();
+            if (currentTimelineTime > totalDur) {
+                currentTimelineTime = Math.max(0, totalDur - 0.1);
             }
+
+            redrawTimeline(); // Refrescar visualmente
         }
     }
 
@@ -1407,7 +1358,7 @@ public class EditorController {
         gcTimeline.fillRect(0, 0, w, h);
 
         // 2. DIBUJAR SEGMENTOS ESTÁTICOS
-        for (VideoSegment seg : segments) {
+        for (VideoSegment seg : timelineManager.getSegments()) {
             if (isDraggingTimeline && seg == segmentBeingDragged) continue;
 
             double startX = (seg.getStartTime() * pixelsPerSecond) - scrollOffset;
@@ -1425,7 +1376,6 @@ public class EditorController {
         }
 
         if (isDraggingTimeline && segmentBeingDragged != null && dropIndicatorX != -1) {
-
             gcTimeline.setStroke(Color.YELLOW);
             gcTimeline.setLineWidth(1.0);
             gcTimeline.strokeLine(dropIndicatorX, 0, dropIndicatorX, h); // De arriba a abajo
@@ -1440,7 +1390,7 @@ public class EditorController {
         // 5. DIBUJAR REGLA Y CABEZAL
         drawRulerAndPlayhead(w, h, scrollOffset);
 
-        if (hoverTime >= 0 && hoverTime <= totalTimelineDuration) {
+        if (hoverTime >= 0 && hoverTime <= timelineManager.getTotalDuration()) {
             double hX = (hoverTime * pixelsPerSecond) - scrollOffset;
 
             gcTimeline.setStroke(Color.web("#ffffff", 0.4));
@@ -1590,7 +1540,7 @@ public class EditorController {
             }
         }
 
-        if (hoverTime >= 0 && hoverTime <= totalTimelineDuration) {
+        if (hoverTime >= 0 && hoverTime <= timelineManager.getTotalDuration()) {
             double hX = (hoverTime * pixelsPerSecond) - scrollOffset;
 
             gcTimeline.setStroke(Color.web("#ffffff", 0.3));
@@ -1624,14 +1574,17 @@ public class EditorController {
     }
 
     private void updateScrollbarAndRedraw() {
-        if (totalTimelineDuration <= 0) {
+
+        double totalDur = timelineManager.getTotalDuration();
+
+        if (totalDur <= 0) {
             timelineScroll.setVisible(false);
             timelineScroll.setManaged(false);
             return;
         }
 
         double canvasW = timelineCanvas.getWidth();
-        double totalW = totalTimelineDuration * pixelsPerSecond;
+        double totalW = totalDur * pixelsPerSecond;
 
         boolean needsScroll = totalW > canvasW;
         timelineScroll.setVisible(needsScroll);
@@ -1646,9 +1599,17 @@ public class EditorController {
     }
 
     private void updateTimeLabel() {
-        int m = (int) currentTimelineTime / 60; int s = (int) currentTimelineTime % 60;
-        lblTime.setText(String.format("%02d:%02d", m, s) + " / " + String.format("%02d:%02d",
-                (int)totalTimelineDuration/60, (int)totalTimelineDuration%60));
+        double totalDur = timelineManager.getTotalDuration();
+        // Tiempo actual (UI)
+        int m = (int) currentTimelineTime / 60;
+        int s = (int) currentTimelineTime % 60;
+
+        // Tiempo total (Manager)
+        int totalM = (int) totalDur / 60;
+        int totalS = (int) totalDur % 60;
+
+        lblTime.setText(String.format("%02d:%02d", m, s) + " / " +
+                String.format("%02d:%02d", totalM, totalS));
     }
 
     private String formatShortTime(int totalSeconds) {
@@ -1664,10 +1625,9 @@ public class EditorController {
 
         if (f != null) {
             this.localVideoPath = f.getAbsolutePath();
-
             System.out.println("🎥 MODO LOCAL: Video cargado desde " + this.localVideoPath);
 
-            if (loadingSpinner != null) loadingSpinner.setVisible(true);
+            setLoading(true);
 
             gcTimeline.clearRect(0,0, timelineCanvas.getWidth(), timelineCanvas.getHeight());
 
@@ -1680,21 +1640,17 @@ public class EditorController {
             Task<TreeMap<Double, Image>> task = new Task<>() {
                 @Override
                 protected TreeMap<Double, Image> call() {
-                    // Intervalo de 5 segundos, altura de miniatura 80px (para aprovechar la nueva altura)
                     return new FilmstripService().generateFilmstrip(f, 5.0, 80);
                 }
             };
 
             task.setOnSucceeded(event -> {
-                if (loadingSpinner != null) loadingSpinner.setVisible(false);
+                setLoading(false);
 
                 this.filmstripMap = task.getValue();
-                totalOriginalDuration = videoService.getTotalDuration();
-                totalTimelineDuration = totalOriginalDuration;
-                segments.clear();
-                segments.add(new VideoSegment(0, totalTimelineDuration, 0, totalOriginalDuration,
-                        "#3b82f6", false));
-                // Resetear posición
+
+                timelineManager.reset(videoService.getTotalDuration());
+
                 currentTimelineTime = 0;
 
                 Platform.runLater(() -> {
@@ -1706,7 +1662,8 @@ public class EditorController {
 
                 if (timelineScroll != null) {
                     timelineScroll.setValue(0);
-                    timelineScroll.setMax(totalTimelineDuration * pixelsPerSecond);
+                    // Usamos la duración del Manager para configurar el scroll
+                    timelineScroll.setMax(timelineManager.getTotalDuration() * pixelsPerSecond);
                 }
 
                 updateScrollbarAndRedraw();
@@ -1715,7 +1672,7 @@ public class EditorController {
             });
 
             task.setOnFailed(e -> {
-                if (loadingSpinner != null) loadingSpinner.setVisible(false);
+                setLoading(false);
                 System.err.println("Error generando miniaturas");
             });
 
@@ -1730,35 +1687,35 @@ public class EditorController {
 
     private void seekTimeline(double mouseX) {
         resetTracking();
-
         autoSaveActiveSegmentDrawings();
 
         double scrollOffset = timelineScroll.getValue();
         double time = (mouseX + scrollOffset) / pixelsPerSecond;
 
+        // 1. Validaciones con el Manager
         if (time < 0) time = 0;
-        if (time > totalTimelineDuration) time = totalTimelineDuration;
+        double totalDur = timelineManager.getTotalDuration(); // <-- CAMBIO
+        if (time > totalDur) time = totalDur;
 
         currentTimelineTime = time;
 
-        VideoSegment targetSeg = null;
-        for (VideoSegment s : segments) {
-            if (time >= s.getStartTime() && time <= s.getEndTime()) {
-                targetSeg = s;
-                break;
-            }
-        }
+        // 2. Buscamos segmento bajo el cabezal
+        VideoSegment targetSeg = timelineManager.getSegmentAt(time); // <-- CAMBIO
+
+        // Necesitamos la duración original para calcular porcentajes
+        double totalOrgDur = timelineManager.getTotalOriginalDuration(); // <-- CAMBIO
 
         if (targetSeg != null) {
+            // --- CASO A: CLICK SOBRE UN CLIP ---
             double offset = time - targetSeg.getStartTime();
             double seekTarget = targetSeg.getSourceStartTime() + offset;
-            performSafeSeek((seekTarget / totalOriginalDuration) * 100.0);
+            performSafeSeek((seekTarget / totalOrgDur) * 100.0);
         } else {
-            for (VideoSegment s : segments) {
-                if (s.getStartTime() > time) {
-                    performSafeSeek((s.getSourceStartTime() / totalOriginalDuration) * 100.0);
-                    break;
-                }
+            // --- CASO B: CLICK EN UN HUECO (GAP) ---
+            VideoSegment nextSeg = timelineManager.getNextSegment(null, time);
+
+            if (nextSeg != null) {
+                performSafeSeek((nextSeg.getSourceStartTime() / totalOrgDur) * 100.0);
             }
         }
 
@@ -1800,8 +1757,9 @@ public class EditorController {
 
     @FXML
     public void onSkipToEnd() {
-        if (totalTimelineDuration > 0) {
-            currentTimelineTime = totalTimelineDuration;
+        double totalDur = timelineManager.getTotalDuration();
+        if (totalDur > 0) {
+            currentTimelineTime = totalDur;
             if (timelineScroll != null) timelineScroll.setValue(timelineScroll.getMax());
             if (videoService != null) {
                 if (videoService.isPlaying()) onPlayPause();
@@ -1812,51 +1770,12 @@ public class EditorController {
         }
     }
 
-    private VideoSegment getCurrentSegment() {
-        double epsilon = 0.05; // 50 milisegundos de margen de error
-        for (VideoSegment seg : segments) {
-            if (currentTimelineTime >= seg.getStartTime() - epsilon &&
-                    currentTimelineTime < seg.getEndTime() - epsilon) {
-                return seg;
-            }
-        }
-        return null;
-    }
-
-    private void recalculateSegmentTimes() {
-        if (segments.isEmpty()) return;
-
-        double currentPos = 0.0;
-        double editGap = 0.05;
-
-        for (int i = 0; i < segments.size(); i++) {
-            VideoSegment seg = segments.get(i);
-            double duration = seg.getDuration();
-
-            seg.setStartTime(currentPos);
-            seg.setEndTime(currentPos + duration);
-
-            currentPos = seg.getEndTime() + editGap;
-        }
-
-        totalTimelineDuration = currentPos - editGap;
-        updateScrollbarAndRedraw();
-    }
-
-    private int getNextSegmentIndexByTime() {
-        for (int i = 0; i < segments.size(); i++) {
-            if (segments.get(i).getStartTime() > currentTimelineTime) {
-                return i;
-            }
-        }
-        return segments.size();
-    }
-
     private void saveState() {
-        if (segments == null) return;
+        if (timelineManager.getSegments() == null) return;
 
         List<VideoSegment> segmentsSnapshot = new ArrayList<>();
-        for (VideoSegment s : segments) {
+
+        for (VideoSegment s : timelineManager.getSegments()) {
             VideoSegment copySeg = new VideoSegment(
                     s.getStartTime(), s.getEndTime(),
                     s.getSourceStartTime(), s.getSourceEndTime(),
@@ -1872,7 +1791,7 @@ public class EditorController {
             shapesSnapshot.add(sh.copy());
         }
 
-        undoStack.push(new EditorState(segmentsSnapshot, shapesSnapshot, totalTimelineDuration));
+        undoStack.push(new EditorState(segmentsSnapshot, shapesSnapshot, timelineManager.getTotalDuration()));
         redoStack.clear();
         updateUndoRedoButtons();
     }
@@ -1886,7 +1805,11 @@ public class EditorController {
     public void onUndo() {
         if (undoStack.isEmpty()) return;
 
-        redoStack.push(new EditorState(segments, shapes, totalTimelineDuration));
+        redoStack.push(new EditorState(
+                new ArrayList<>(timelineManager.getSegments()),
+                new ArrayList<>(shapes),
+                timelineManager.getTotalDuration()
+        ));
 
         restoreState(undoStack.pop());
         updateUndoRedoButtons();
@@ -1896,17 +1819,24 @@ public class EditorController {
     public void onRedo() {
         if (redoStack.isEmpty()) return;
 
-        undoStack.push(new EditorState(new ArrayList<>(segments), new ArrayList<>(shapes), totalTimelineDuration));
+        undoStack.push(new EditorState(
+                new ArrayList<>(timelineManager.getSegments()),
+                new ArrayList<>(shapes),
+                timelineManager.getTotalDuration()
+        ));
 
         restoreState(redoStack.pop());
         updateUndoRedoButtons();
     }
 
     private void restoreState(EditorState state) {
-        this.segments = new ArrayList<>(state.segmentsSnapshot);
-        this.shapes = new ArrayList<>(state.shapesSnapshot);
-        this.totalTimelineDuration = state.durationSnapshot;
+        // 1. Restaurar SEGMENTOS y DURACIÓN (Delegado al Manager)
+        timelineManager.restoreState(state.segmentsSnapshot, state.durationSnapshot); // <-- CAMBIO
 
+        // 2. Restaurar DIBUJOS (Se queda en el Controller)
+        this.shapes = new ArrayList<>(state.shapesSnapshot);
+
+        // 3. Actualizar UI
         updateScrollbarAndRedraw();
         redrawVideoCanvas();
         redrawTimeline();
@@ -1926,18 +1856,24 @@ public class EditorController {
         File destFile = fc.showSaveDialog(container.getScene().getWindow());
         if (destFile == null) return;
 
-        if (loadingSpinner != null) loadingSpinner.setVisible(true);
+        setLoading(true);
         if (lblStatus != null) lblStatus.setText("Preparando exportación local...");
+
+        // --- IMPORTANTE ---
+        // Hacemos una COPIA de la lista de segmentos AQUÍ (en el hilo principal)
+        // para que el hilo secundario trabaje seguro.
+        List<VideoSegment> segmentsToExport = new ArrayList<>(timelineManager.getSegments());
 
         new Thread(() -> {
             try {
                 List<LocalExportService.ExportJobSegment> jobSegments = new ArrayList<>();
 
-                for (VideoSegment seg : segments) {
+                // Usamos la copia 'segmentsToExport' en lugar de 'segments'
+                for (VideoSegment seg : segmentsToExport) {
                     if (seg.isFreezeFrame()) {
                         FutureTask<String> task = new FutureTask<>(() -> saveSnapshotToTempFile(seg));
                         Platform.runLater(task);
-                        String imgPath = task.get(); // Esperamos a que se genere
+                        String imgPath = task.get();
 
                         if (imgPath != null) {
                             jobSegments.add(LocalExportService.ExportJobSegment.freeze(imgPath, seg.getDuration()));
@@ -1947,13 +1883,19 @@ public class EditorController {
                     }
                 }
 
-                Platform.runLater(() -> lblStatus.setText("Renderizando video (FFmpeg)..."));
+                Platform.runLater(() -> {
+                    lblStatus.setFont(Font.font("System", FontWeight.BOLD, 22));
+                    lblStatus.setTextFill(Color.web("#ffffff"));
+                    lblStatus.setText("Exportando video...");
+                });
 
                 LocalExportService exportService = new LocalExportService();
                 exportService.renderProject(localVideoPath, jobSegments, destFile);
 
                 Platform.runLater(() -> {
-                    if (loadingSpinner != null) loadingSpinner.setVisible(false);
+                    setLoading(false);
+                    lblStatus.setFont(Font.font("System", FontWeight.BOLD, 22));
+                    lblStatus.setTextFill(Color.web("#ffffff"));
                     lblStatus.setText("✅ Exportación completada");
                     mostrarAlerta("Éxito", "Video guardado en: " + destFile.getAbsolutePath());
                 });
@@ -1961,7 +1903,7 @@ public class EditorController {
             } catch (Exception e) {
                 e.printStackTrace();
                 Platform.runLater(() -> {
-                    if (loadingSpinner != null) loadingSpinner.setVisible(false);
+                    setLoading(false);
                     mostrarAlerta("Error", "Fallo al exportar: " + e.getMessage());
                 });
             }
@@ -2306,7 +2248,7 @@ public class EditorController {
 
         double topMargin = 22;
         double canvasW = timelineCanvas.getWidth();
-        double edgeThreshold = 70.0; // Distancia al borde para activar el scroll
+        double edgeThreshold = 70.0;
 
         double scrollOffset = timelineScroll.getValue();
 
@@ -2322,7 +2264,7 @@ public class EditorController {
 
             double mousePosTime = (e.getX() + timelineScroll.getValue()) / pixelsPerSecond;
 
-            List<VideoSegment> others = new ArrayList<>(segments);
+            List<VideoSegment> others = new ArrayList<>(timelineManager.getSegments());
             others.remove(segmentBeingDragged);
 
             int newDropIndex = 0;
@@ -2385,6 +2327,7 @@ public class EditorController {
 
     @FXML
     public void onModifyFreezeDuration() {
+        // Validación de UI
         if (selectedSegment == null || !selectedSegment.isFreezeFrame()) {
             mostrarAlerta("Aviso", "Selecciona un clip azul primero.");
             return;
@@ -2403,10 +2346,13 @@ public class EditorController {
 
                 saveState();
 
-                selectedSegment.setEndTime(selectedSegment.getStartTime() + newDuration);
+                // --- CAMBIO AQUÍ ---
+                // Delegamos el cambio y el reajuste al Manager
+                timelineManager.modifySegmentDuration(selectedSegment, newDuration);
+                // -------------------
 
-                recalculateSegmentTimes();
-                redrawTimeline();
+                updateScrollbarAndRedraw(); // Actualiza scroll y repinta
+
             } catch (NumberFormatException e) {
                 mostrarAlerta("Error", "Introduce un número válido.");
             }
@@ -2417,7 +2363,8 @@ public class EditorController {
 
         if (shapes.isEmpty()) return;
 
-        VideoSegment activeSeg = getCurrentSegment();
+        VideoSegment activeSeg = timelineManager.getSegmentAt(currentTimelineTime);
+
         if (activeSeg == null || !activeSeg.isFreezeFrame()) return;
 
         String segmentId = activeSeg.getId();
@@ -2492,13 +2439,13 @@ public class EditorController {
             isPlayingFreeze = false;
         }
 
-        segments.clear();
+        timelineManager.reset(0);
         shapes.clear();
         annotationsCache.clear();
         filmstripMap.clear();
 
         currentTimelineTime = 0.0;
-        totalTimelineDuration = 0.0;
+
         serverVideoId = null;
         selectedSegment = null;
         selectedShapeToMove = null;
@@ -2506,7 +2453,6 @@ public class EditorController {
         videoView.setImage(null);
 
         gcDraw.clearRect(0, 0, drawCanvas.getWidth(), drawCanvas.getHeight());
-
         gcTimeline.clearRect(0, 0, timelineCanvas.getWidth(), timelineCanvas.getHeight());
 
         timelineScroll.setValue(0);
@@ -2529,7 +2475,8 @@ public class EditorController {
 
             shapes.remove(selectedShapeToMove);
 
-            VideoSegment activeSeg = getCurrentSegment();
+            VideoSegment activeSeg = timelineManager.getSegmentAt(currentTimelineTime);
+
             if (activeSeg != null && annotationsCache.containsKey(activeSeg.getId())) {
                 annotationsCache.get(activeSeg.getId()).remove(selectedShapeToMove);
             }
@@ -2543,7 +2490,7 @@ public class EditorController {
 
     @FXML
     public void onClearAllShapes() {
-        VideoSegment activeSeg = getCurrentSegment();
+        VideoSegment activeSeg = timelineManager.getSegmentAt(currentTimelineTime);
 
         if (shapes.isEmpty() && (activeSeg == null || !annotationsCache.containsKey(activeSeg.getId()))) {
             setToolCursor();

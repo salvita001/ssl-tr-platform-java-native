@@ -8,6 +8,7 @@
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/controller/EditorController.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/controller/EditorController.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/manager/TimelineManager.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/manager/TimelineManager.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/resources/layout.fxml" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/resources/layout.fxml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -135,7 +136,7 @@
       <workItem from="1768474648977" duration="55000" />
       <workItem from="1768475380560" duration="789000" />
       <workItem from="1768476176234" duration="492000" />
-      <workItem from="1768476675506" duration="14444000" />
+      <workItem from="1768476675506" duration="22488000" />
     </task>
     <servers />
   </component>
