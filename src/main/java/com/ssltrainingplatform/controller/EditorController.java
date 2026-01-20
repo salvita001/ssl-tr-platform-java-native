@@ -9,11 +9,13 @@ import com.ssltrainingplatform.model.VideoSegment;
 import com.ssltrainingplatform.service.*;
 import com.ssltrainingplatform.ui.renderer.CanvasRenderer;
 import com.ssltrainingplatform.util.AppIcons;
+import com.ssltrainingplatform.util.SimpleKalmanTracker;
 import javafx.animation.AnimationTimer;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.embed.swing.SwingFXUtils;
 import javafx.fxml.FXML;
+import javafx.scene.Cursor;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.*;
@@ -108,7 +110,7 @@ public class EditorController {
     // AÑADIDAS NUEVAS HERRAMIENTAS AL ENUM
     public enum ToolType {
         CURSOR, PEN, TEXT, ARROW, ARROW_DASHED, ARROW_3D, SPOTLIGHT, BASE, WALL,
-        POLYGON, RECT_SHADED, ZOOM_CIRCLE, ZOOM_RECT, TRACKING
+        POLYGON, RECT_SHADED, ZOOM_CIRCLE, ZOOM_RECT, TRACKING, LINE_DEFENSE
     }
     private ToolType currentTool = ToolType.CURSOR;
 
@@ -174,6 +176,18 @@ public class EditorController {
 
     private DrawingShape textShapeBeingEdited = null;
 
+    private SimpleKalmanTracker kalmanFilter = null;
+
+    private int framesLost = 0;
+
+    private int frameSkipCounter = 0;
+
+    private int framesTracked = 0;
+
+    private double lastProcessedTime = -1;
+
+    @FXML private ToggleButton btnLineDefense;
+
     // =========================================================================
     //                               INICIALIZACIÓN
     // =========================================================================
@@ -185,7 +199,7 @@ public class EditorController {
         videoService = new VideoService(videoView);
         aiService = new AIService();
         try {
-            aiService.loadModel("models/yolo11l.torchscript");
+            aiService.loadModel("models/yolo11n.torchscript");
         } catch (Exception ignored) {}
 
         applyIcons();
@@ -354,21 +368,15 @@ public class EditorController {
         placeholderView.visibleProperty().bind(videoView.imageProperty().isNull());
 
         timelineCanvas.setOnMouseMoved(e -> {
-            double topMargin = 22;
             double scrollOffset = timelineScroll.getValue();
 
-            // 1. Calculamos el tiempo bajo el ratón para el tooltip
-            if (e.getY() < topMargin) {
-                hoverTime = (e.getX() + scrollOffset) / pixelsPerSecond;
-                // 2. ✅ LÓGICA DE LIVE PREVIEW (SCRUBBING)
-                long now = System.currentTimeMillis();
-                // Throttling: Solo actualizamos el vídeo cada 30ms para fluidez
-                if (now - lastScrubTime > 30) {
-                    seekTimeline(e.getX());
-                    lastScrubTime = now;
-                }
-            } else {
-                hoverTime = -1;
+            hoverTime = (e.getX() + scrollOffset) / pixelsPerSecond;
+            // 2. ✅ LÓGICA DE LIVE PREVIEW (SCRUBBING)
+            long now = System.currentTimeMillis();
+            // Throttling: Solo actualizamos el vídeo cada 30ms para fluidez
+            if (now - lastScrubTime > 30) {
+                seekTimeline(e.getX());
+                lastScrubTime = now;
             }
             redrawTimeline();
         });
@@ -401,6 +409,143 @@ public class EditorController {
         // Empezamos ocultos
         setLoading(false);
 
+        timelineCanvas.setCursor(Cursor.DEFAULT);
+
+    }
+
+    private void processMultiTrackingLogic(List<DetectedObjects.DetectedObject> results, boolean hasAIData) {
+        VideoSegment activeSeg = timelineManager.getSegmentAt(currentTimelineTime);
+
+        // --- FIX PERSISTENCIA: Si es tracking, permitimos que siga vivo aunque cambie el segmento ---
+        // (Esto evita que desaparezca al salir del FreezeFrame y entrar en el video)
+
+        Image img = videoView.getImage();
+        if (img == null) return;
+
+        // Cálculos de escala
+        double sc = Math.min(drawCanvas.getWidth() / img.getWidth(), drawCanvas.getHeight() / img.getHeight());
+        double vDW = img.getWidth() * sc; double vDH = img.getHeight() * sc;
+        double oX = (drawCanvas.getWidth() - vDW) / 2.0; double oY = (drawCanvas.getHeight() - vDH) / 2.0;
+
+        for (DrawingShape shape : this.shapes) {
+
+            boolean isTrackingType = "tracking".equals(shape.getType()) || "line_defense".equals(shape.getType());
+
+            // A. FILTRO DE SEGURIDAD MODIFICADO
+            // Si NO es tracking, aplicamos la restricción estricta de ID.
+            // Si ES tracking, permitimos que se dibuje para mantener la continuidad.
+            if (!isTrackingType) {
+                if (activeSeg == null || shape.getClipId() == null || !shape.getClipId().equals(activeSeg.getId())) {
+                    continue;
+                }
+            }
+
+            // --- TIPO 1: TRACKING INDIVIDUAL ---
+            if ("tracking".equals(shape.getType())) {
+                if (kalmanFilter == null) kalmanFilter = new SimpleKalmanTracker(shape.getEndX(), shape.getEndY());
+                kalmanFilter.predict();
+
+                if (hasAIData && results != null) {
+                    DetectedObjects.DetectedObject best = findClosestHuman(results, kalmanFilter.getX(), kalmanFilter.getY(), vDW, vDH, oX, oY);
+                    if (best != null) {
+                        var pt = convertToScreenCoords(best, vDW, vDH, oX, oY);
+                        kalmanFilter.update(pt.x, pt.y);
+
+                        // Actualizar posición Pies
+                        shape.setEndX(pt.x); shape.setEndY(pt.y);
+
+                        // Calcular altura Cabeza (Bounding Box) y guardar
+                        var r = best.getBoundingBox().getBounds();
+                        double headY = (r.getY() / 640.0) * vDH + oY;
+                        shape.setStartX(pt.x); shape.setStartY(headY); // Start es la cabeza
+                        shape.setUserData(pt.y - headY); // Guardar altura
+                    }
+                } else {
+                    // Inercia
+                    double currentH = (shape.getUserData() instanceof Double) ? (Double) shape.getUserData() : 60.0;
+                    shape.setEndX(kalmanFilter.getX()); shape.setEndY(kalmanFilter.getY());
+                    shape.setStartX(kalmanFilter.getX()); shape.setStartY(kalmanFilter.getY() - currentH);
+                }
+            }
+
+            // --- TIPO 2: DEFENSA EN LÍNEA (MULTI JUGADOR) ---
+            else if ("line_defense".equals(shape.getType())) {
+                List<SimpleKalmanTracker> trackers = shape.getInternalTrackers();
+                List<java.awt.Point.Double> visualPoints = shape.getKeyPoints(); // Puntos actuales en pantalla
+
+                // 1. SINCRONIZACIÓN DE SEGURIDAD (CRUCIAL)
+                // Si acabas de dibujar, tienes puntos visuales pero NO tienes trackers (cerebros).
+                // O si ha cambiado el número de puntos, reiniciamos todo para que coincida.
+                if (trackers.isEmpty() || trackers.size() != visualPoints.size()) {
+                    trackers.clear();
+                    for (java.awt.Point.Double p : visualPoints) {
+                        // Creamos un tracker nuevo exactamente donde está el punto dibujado
+                        trackers.add(new SimpleKalmanTracker(p.x, p.y));
+                    }
+                }
+
+                // Map para alturas (para el triángulo visual)
+                Map<Integer, Double> playerHeights;
+                if (shape.getUserData() instanceof Map) {
+                    playerHeights = (Map<Integer, Double>) shape.getUserData();
+                } else {
+                    playerHeights = new HashMap<>();
+                    shape.setUserData(playerHeights);
+                }
+
+                // 2. BUCLE DE TRACKING INDIVIDUAL PARA CADA JUGADOR
+                for (int i = 0; i < trackers.size(); i++) {
+                    SimpleKalmanTracker tracker = trackers.get(i);
+
+                    // A. Predecir movimiento (Inercia)
+                    tracker.predict();
+
+                    if (hasAIData && results != null) {
+                        // B. Buscar el humano más cercano a la predicción de ESTE punto específico
+                        DetectedObjects.DetectedObject best = findClosestHuman(results, tracker.getX(), tracker.getY(), vDW, vDH, oX, oY);
+
+                        if (best != null) {
+                            var pt = convertToScreenCoords(best, vDW, vDH, oX, oY);
+
+                            // C. Corregir el tracker con el dato real de la IA
+                            tracker.update(pt.x, pt.y);
+
+                            // D. Actualizar el dibujo visual
+                            shape.updateKeyPointPosition(i, pt.x, pt.y);
+
+                            // E. Calcular y guardar altura para el triángulo
+                            var r = best.getBoundingBox().getBounds();
+                            double headY = (r.getY() / 640.0) * vDH + oY;
+                            double height = pt.y - headY;
+                            playerHeights.put(i, height);
+                        }
+                    } else {
+                        // Si no hay IA en este frame (frame intermedio), usamos la predicción del tracker
+                        // para mover el dibujo suavemente.
+                        shape.updateKeyPointPosition(i, tracker.getX(), tracker.getY());
+                    }
+                }
+            }
+        }
+        redrawVideoCanvas();
+    }
+
+    private void updateTrackingShapePosition() {
+        if (kalmanFilter == null || trackingShape == null) return;
+
+        // Recuperar altura guardada o calcular una por defecto
+        double currentHeight = 60.0; // Valor default
+        if (trackingShape.getUserData() instanceof Double) {
+            currentHeight = (Double) trackingShape.getUserData();
+        } else {
+            // Fallback: altura actual del dibujo
+            currentHeight = trackingShape.getEndY() - trackingShape.getStartY();
+        }
+
+        trackingShape.setEndX(kalmanFilter.getX());
+        trackingShape.setEndY(kalmanFilter.getY());
+        trackingShape.setStartX(kalmanFilter.getX());
+        trackingShape.setStartY(kalmanFilter.getY() - currentHeight);
     }
 
     private void setLoading(boolean isLoading) {
@@ -437,7 +582,6 @@ public class EditorController {
 
         double scrollOffset = timelineScroll.getValue();
         double clickTime = (e.getX() + scrollOffset) / pixelsPerSecond;
-        double topMargin = 22;
 
         if (timelineContextMenu != null) timelineContextMenu.hide();
 
@@ -464,11 +608,6 @@ public class EditorController {
         selectedSegment = clickedSeg; // ✅ AHORA SE SELECCIONA AL HACER CLIC
         segmentBeingDragged = null;
         isDraggingTimeline = false;
-
-        if (e.getY() < topMargin) {
-            seekTimeline(e.getX());
-            return;
-        }
 
         if (clickedSeg != null) {
             // ✅ GUARDAR ESTADO ANTES DE MOVER (Para Undo paso a paso)
@@ -518,9 +657,20 @@ public class EditorController {
         if(btnTracking != null) btnTracking.setGraphic(AppIcons.getIcon("tracking", 20));
         if(btnDeleteShape != null) btnDeleteShape.setGraphic(AppIcons.getIcon("trash", 20));
         if(btnClearCanvas != null) btnClearCanvas.setGraphic(AppIcons.getIcon("clear", 26));
+        if(btnLineDefense != null) btnLineDefense.setGraphic(AppIcons.getIcon("line-defense", 28));
     }
 
     // --- SELECTORES HERRAMIENTAS ---
+    @FXML
+    public void setToolLineDefense() {
+        //changeTool(ToolType.LINE_DEFENSE);
+        //// Activamos IA automáticamente porque esta herramienta LA NECESITA
+        //if (btnToggleAI != null && !btnToggleAI.isSelected()) {
+          //  btnToggleAI.setSelected(true);
+        //}
+        //runAIDetectionManual(); // Analizar frame actual para facilitar clics
+    }
+
     @FXML
     public void setToolCursor() {
         if (btnCursor != null) btnCursor.setSelected(true);
@@ -587,14 +737,14 @@ public class EditorController {
 
     @FXML
     public void setToolTracking() {
-        changeTool(ToolType.TRACKING);
-        // Forzamos la activación del botón de IA si no está puesto
-        if (btnToggleAI != null && !btnToggleAI.isSelected()) {
-            btnToggleAI.setSelected(true);
-            System.out.println("DEBUG: IA activada automáticamente para Tracking.");
-        }
+        //changeTool(ToolType.TRACKING);
+        //// Forzamos la activación del botón de IA si no está puesto
+        //if (btnToggleAI != null && !btnToggleAI.isSelected()) {
+          //  btnToggleAI.setSelected(true);
+           // System.out.println("DEBUG: IA activada automáticamente para Tracking.");
+        //}
 
-        runAIDetectionManual();
+        //runAIDetectionManual();
     }
 
     private void changeTool(ToolType type) {
@@ -606,7 +756,22 @@ public class EditorController {
 
     private void finishPolyShape() {
         if (currentShape != null &&
-                ("wall".equals(currentShape.getType()) || "polygon".equals(currentShape.getType()))) {
+                ("wall".equals(currentShape.getType()) ||
+                        "polygon".equals(currentShape.getType()) ||
+                        "line_defense".equals(currentShape.getType()))) {
+
+            // Lógica específica para línea defensiva
+            if ("line_defense".equals(currentShape.getType())) {
+                if (currentShape.getKeyPoints().size() < 2) {
+                    shapes.remove(currentShape); // Borrar si tiene menos de 2 jugadores
+                } else {
+                    switchToCursorAndSelect(currentShape);
+                }
+                currentShape = null;
+                redrawVideoCanvas();
+                return;
+            }
+
             List<Double> pts = currentShape.getPoints();
 
             if (pts.size() % 2 != 0) pts.remove(pts.size() - 1);
@@ -778,6 +943,45 @@ public class EditorController {
             return;
         }
 
+        // ---------------------------------------------------------
+        //  NUEVA LÓGICA: DEFENSA EN LÍNEA (MULTI-TRACKING)
+        // ---------------------------------------------------------
+        if (currentTool == ToolType.LINE_DEFENSE) {
+
+            // 1. FINALIZAR: Doble clic o clic derecho cierra la línea
+            if (e.getClickCount() == 2 || e.getButton() == MouseButton.SECONDARY) {
+                finishPolyShape();
+                return;
+            }
+
+            // 2. CREAR O CONTINUAR
+            if (currentShape == null || !"line_defense".equals(currentShape.getType())) {
+                // --- INICIO: PRIMER CLIC (JUGADOR 1) ---
+                saveState();
+
+                // Creamos la forma vacía
+                currentShape = new DrawingShape("ld_" + System.currentTimeMillis(),
+                        "line_defense", e.getX(), e.getY(), toHex(colorPicker.getValue()));
+
+                if (currentSeg != null) currentShape.setClipId(currentSeg.getId());
+                currentShape.setStrokeWidth(currentStrokeWidth);
+
+                // AÑADIMOS EL PRIMER PUNTO (Donde has hecho clic)
+                // Ya no usamos +50, +100... Usamos la posición real del ratón.
+                currentShape.addKeyPoint(e.getX(), e.getY());
+
+                shapes.add(currentShape);
+
+            } else {
+                // --- CONTINUACIÓN: SIGUIENTES CLICS (JUGADOR 2, 3, 4...) ---
+                // Añadimos el siguiente punto a la línea existente
+                currentShape.addKeyPoint(e.getX(), e.getY());
+            }
+
+            redrawVideoCanvas();
+            return;
+        }
+
         // ARRASTRE
         String type = switch(currentTool) {
             case ARROW -> "arrow";
@@ -856,6 +1060,7 @@ public class EditorController {
             trackingShape.setClipId(currentSegTrack.getId());
 
             shapes.add(trackingShape);
+            kalmanFilter = null;
             redrawVideoCanvas();
         }
     }
@@ -933,10 +1138,16 @@ public class EditorController {
     }
 
     private void onCanvasReleased(MouseEvent e) {
-        if (currentTool != ToolType.POLYGON && currentShape != null) {
+        // CORRECCIÓN: Añadimos LINE_DEFENSE a las excepciones.
+        // Si es Polígono o Defensa en Línea, NO cambiamos al cursor todavía,
+        // porque queremos seguir añadiendo puntos con más clics.
+        boolean isMultiPointTool = (currentTool == ToolType.POLYGON || currentTool == ToolType.LINE_DEFENSE);
+
+        if (!isMultiPointTool && currentShape != null) {
             switchToCursorAndSelect(currentShape);
             currentShape = null;
         }
+
         dragMode = 0;
     }
 
@@ -1028,9 +1239,8 @@ public class EditorController {
 
         gcDraw.drawImage(vidImg, offX, offY, vidDispW, vidDispH);
 
-        // IA: Solo dibujamos los cuadros de detección si la herramienta de Tracking está activa
-        if (btnToggleAI.isSelected() && currentTool == ToolType.TRACKING && !videoService.isPlaying()
-                && currentDetections != null) {
+        // Permitimos dibujar las cajas MIENTRAS se reproduce para depurar
+        if (btnToggleAI.isSelected() && currentTool == ToolType.TRACKING && currentDetections != null) {
             gcDraw.setLineWidth(1.5);
             for (var obj : currentDetections) {
                 if (obj.getClassName().equals("person")) {
@@ -1053,21 +1263,34 @@ public class EditorController {
         }
 
         for (DrawingShape s : allToDraw) {
-            if (s.getClipId() != null) {
-                if (activeSegId == null || !activeSegId.equals(s.getClipId())) {
-                    continue;
+
+            // --- AQUÍ ESTÁ EL CAMBIO (FIX PARA QUE NO DESAPAREZCAN) ---
+            // Verificamos si es un dibujo de tracking (simple o línea defensa)
+            boolean isTracking = "tracking".equals(s.getType()) || "line_defense".equals(s.getType());
+
+            // Si NO es tracking, aplicamos la regla estricta: debe coincidir el ID del clip.
+            // Si SÍ es tracking, nos saltamos esta comprobación para que se siga viendo al reproducir.
+            if (!isTracking) {
+                if (s.getClipId() != null) {
+                    if (activeSegId == null || !activeSegId.equals(s.getClipId())) {
+                        continue;
+                    }
                 }
             }
+            // -----------------------------------------------------------
+
             Color c = Color.web(s.getColor());
             double size = s.getStrokeWidth();
-            double x1 = s.getStartX(); 
+            double x1 = s.getStartX();
             double y1 = s.getStartY();
-            double x2 = s.getEndX(); 
+            double x2 = s.getEndX();
             double y2 = s.getEndY();
 
             if (s == selectedShapeToMove) {
                 canvasRenderer.drawSelectionOverlay(s, size, x1, y1, x2, y2);
             }
+
+            // El CanvasRenderer se encarga del estilo (Círculos y Triángulos)
             canvasRenderer.drawShape(vidImg, vidDispW, vidDispH, offX, offY, s, c, size, x1, y1, x2, y2);
         }
 
@@ -1216,71 +1439,75 @@ public class EditorController {
             }
         });
 
+        // --- CORRECCIÓN PARA setupVideoEvents ---
         videoService.setOnFrameCaptured(bufferedImage -> {
-            int currentFrame = frameCounter.incrementAndGet();
-            if (currentFrame % 2 != 0) return;
-            if (!btnToggleAI.isSelected() || isProcessingAI.get()) return;
+            // 1. Chequeo rápido
+            if (!btnToggleAI.isSelected() || trackingShape == null) return;
 
-            isProcessingAI.set(true);
-            aiExecutor.submit(() -> {
-                try {
-                    var results = aiService.detectPlayers(bufferedImage);
+            frameSkipCounter++;
 
-                    Platform.runLater(() -> {
-                        this.currentDetections = results;
-                        VideoSegment activeSeg = timelineManager.getSegmentAt(currentTimelineTime);
+            // 2. Lógica de calentamiento y salto de frames
+            boolean isWarmup = (framesTracked < 10);
+            boolean runHeavyAI = isWarmup || (frameSkipCounter % 3 == 0);
 
-                        if (trackingShape == null && activeSeg != null && videoService.isPlaying()) {
-                            for (DrawingShape s : shapes) {
-                                if ("tracking".equals(s.getType()) && activeSeg.getId().equals(s.getClipId())) {
-                                    trackingShape = s;
-                                    break;
-                                }
-                            }
-                        }
+            if (runHeavyAI && !isProcessingAI.get()) {
+                isProcessingAI.set(true);
+                aiExecutor.submit(() -> {
+                    try {
+                        // --- CORRECCIÓN: La imagen ya viene como BufferedImage ---
+                        // No usamos SwingFXUtils. La usamos directamente como 'fullImage'.
+                        BufferedImage fullImage = bufferedImage;
 
-                        if (trackingShape != null && videoService.isPlaying()) {
-                            if (activeSeg == null || !activeSeg.getId().equals(trackingShape.getClipId())) {
-                                trackingShape = null;
-                                return;
-                            }
+                        // 3. REDIMENSIONAR (Optimización de velocidad)
+                        double aspect = (double) fullImage.getHeight() / fullImage.getWidth();
+                        int newW = 640;
+                        int newH = (int) (newW * aspect);
 
-                            Image img = videoView.getImage();
-                            if (img == null) return;
+                        BufferedImage resizedImage = new BufferedImage(newW, newH, BufferedImage.TYPE_INT_BGR);
+                        var g = resizedImage.createGraphics();
+                        g.drawImage(fullImage, 0, 0, newW, newH, null);
+                        g.dispose();
+                        // --------------------------------------------------
 
-                            double sc = Math.min(drawCanvas.getWidth() / img.getWidth(), drawCanvas.getHeight() / img.getHeight());
-                            double vDW = img.getWidth() * sc; double vDH = img.getHeight() * sc;
-                            double oX = (drawCanvas.getWidth() - vDW) / 2.0; double oY = (drawCanvas.getHeight() - vDH) / 2.0;
+                        // 4. Ejecutar IA con la imagen pequeña
+                        var results = aiService.detectPlayers(resizedImage);
 
-                            DetectedObjects.DetectedObject closest = null;
-                            double dMin = 120.0;
-
-                            for (var obj : results) {
-                                if (obj.getClassName().equals("person")) {
-                                    var r = obj.getBoundingBox().getBounds();
-                                    double nx = ((r.getX() + r.getWidth()/2.0) / 640.0) * vDW + oX;
-                                    double ny = ((r.getY() + r.getHeight()) / 640.0) * vDH + oY;
-                                    double d = Math.sqrt(Math.pow(trackingShape.getEndX() - nx, 2)
-                                            + Math.pow(trackingShape.getEndY() - ny, 2));
-                                    if (d < dMin) { dMin = d; closest = obj; }
-                                }
-                            }
-
-                            if (closest != null) {
-                                var r = closest.getBoundingBox().getBounds();
-                                double cX = ((r.getX() + r.getWidth()/2.0) / 640.0) * vDW + oX;
-                                trackingShape.setStartX(cX);
-                                trackingShape.setStartY((r.getY() / 640.0) * vDH + oY);
-                                trackingShape.setEndX(cX);
-                                trackingShape.setEndY(((r.getY() + r.getHeight()) / 640.0) * vDH + oY);
-                            }
-                        }
-                        redrawVideoCanvas();
+                        Platform.runLater(() -> {
+                            this.currentDetections = results;
+                            // CAMBIO: Llamamos a la nueva lógica multi-tracking
+                            processMultiTrackingLogic(results, true);
+                            isProcessingAI.set(false);
+                        });
+                    } catch (Exception e) {
+                        e.printStackTrace();
                         isProcessingAI.set(false);
-                    });
+                    }
+                });
+            } else {
+                // Frames intermedios: Solo física
+                Platform.runLater(() -> {
+                    processMultiTrackingLogic(null, false);
+                });
+            }
+        });
+    }
 
-                } catch (Exception e) { isProcessingAI.set(false); }
-            });
+    private void forceStopTracking() {
+        Platform.runLater(() -> {
+            // Detenemos la matemática
+            kalmanFilter = null;
+            framesLost = 0;
+            framesTracked = 0;
+
+            // --- CAMBIO CRUCIAL: NO BORRAMOS LA FORMA ---
+            // Simplemente ponemos trackingShape a null para que la IA deje de moverlo.
+            // El círculo se quedará quieto donde se perdió, pero NO desaparecerá.
+            trackingShape = null;
+
+            // (Opcional) Si quieres avisar por consola
+            System.out.println("Tracking detenido (pausa o pérdida), pero dibujo mantenido.");
+
+            redrawVideoCanvas();
         });
     }
 
@@ -1326,6 +1553,11 @@ public class EditorController {
 
     private void checkPlaybackJump() {
         VideoSegment currentSeg = timelineManager.getSegmentAt(currentTimelineTime);
+
+        if (currentSeg == null ||
+                (trackingShape != null && !currentSeg.getId().equals(trackingShape.getClipId()))) {
+            kalmanFilter = null;
+        }
 
         if (currentSeg != null && currentSeg.isFreezeFrame()) {
             if (!isPlayingFreeze) {
@@ -1731,6 +1963,11 @@ public class EditorController {
             task.setOnSucceeded(event -> {
                 setLoading(false);
 
+                // --- LIMPIEZA OBLIGATORIA AL CARGAR NUEVO VIDEO ---
+                shapes.clear();             // Borrar dibujos anteriores
+                annotationsCache.clear();   // Borrar caché de segmentos
+                resetTracking();            // Resetear variables de IA
+
                 this.filmstripMap = task.getValue();
 
                 timelineManager.reset(videoService.getTotalDuration());
@@ -2030,10 +2267,12 @@ public class EditorController {
         addTooltip(btnSkipStart, "Ir al inicio");
         addTooltip(btnSkipEnd, "Ir al final");
 
-        addTooltip(btnTracking, "Tracking - Seguimiento automático de jugadores");
+        addTooltip(btnTracking, "Tracking - Seguimiento automático de jugador");
 
         addTooltip(btnDeleteShape, "Borrar edición");
         addTooltip(btnClearCanvas, "Limpiar dibujo");
+
+        addTooltip(btnLineDefense, "Multi-Tracking - Seguimiento automático de jugadores");
     }
 
     private void addTooltip(Control node, String text) {
@@ -2117,7 +2356,6 @@ public class EditorController {
         double topMargin = 22;
         double canvasW = timelineCanvas.getWidth();
         double edgeThreshold = 70.0;
-
         double scrollOffset = timelineScroll.getValue();
 
         if (segmentBeingDragged != null && e.getY() >= topMargin) {
@@ -2174,13 +2412,13 @@ public class EditorController {
         MenuItem modifyTimeItem = new MenuItem("Modificar Duración");
         modifyTimeItem.setOnAction(e -> onModifyFreezeDuration());
 
-        MenuItem captureItem = new MenuItem("Capturar Frame");
+        MenuItem captureItem = new MenuItem("Añadir fotograma congelado");
         captureItem.setOnAction(e -> onCaptureFrame());
 
-        MenuItem cutItem = new MenuItem("Cortar");
+        MenuItem cutItem = new MenuItem("Dividir clip");
         cutItem.setOnAction(e -> onCutVideo());
 
-        MenuItem deleteItem = new MenuItem("Borrar");
+        MenuItem deleteItem = new MenuItem("Eliminar");
         deleteItem.setStyle("-fx-text-fill: #ff4444;");
         deleteItem.setOnAction(e -> onDeleteSegment());
 
@@ -2247,15 +2485,17 @@ public class EditorController {
     }
 
     private void runAIDetectionManual() {
+        // Validaciones básicas
         if (btnToggleAI == null || !btnToggleAI.isSelected() || isProcessingAI.get()) return;
 
         Image fxImage = videoView.getImage();
         if (fxImage == null) return;
 
+        // Bloqueamos para que no se solapen peticiones
         isProcessingAI.set(true);
 
         Platform.runLater(() -> {
-            if (lblStatus != null) lblStatus.setText("🔍 Analizando frame...");
+            if (lblStatus != null) lblStatus.setText("🔍 Analizando frame manualmente...");
         });
 
         aiExecutor.submit(() -> {
@@ -2264,26 +2504,28 @@ public class EditorController {
                 var results = aiService.detectPlayers(bufferedImage);
 
                 Platform.runLater(() -> {
-                    if (!btnToggleAI.isSelected()) {
-                        this.currentDetections.clear();
-                        redrawVideoCanvas();
-                        isProcessingAI.set(false);
-                        return;
-                    }
-
+                    // 1. Actualizamos las detecciones para que se pinten los recuadros (si activas debug)
+                    // o para que el clic del ratón sepa dónde hay gente.
                     this.currentDetections = results;
+
+                    // 2. Redibujamos para ver los resultados (si tienes activado el pintado de cajas)
                     redrawVideoCanvas();
 
-                    if (lblStatus != null) lblStatus.setText("✅ Análisis listo");
+                    if (lblStatus != null) lblStatus.setText("✅ Análisis manual listo");
                     isProcessingAI.set(false);
                 });
             } catch (Exception e) {
-                Platform.runLater(() -> isProcessingAI.set(false));
+                e.printStackTrace();
+                Platform.runLater(() -> {
+                    if (lblStatus != null) lblStatus.setText("❌ Error en análisis");
+                    isProcessingAI.set(false);
+                });
             }
         });
     }
 
     private void resetTracking() {
+        kalmanFilter = null;
         this.trackedObject = null;
         this.trackingShape = null;
         this.currentDetections.clear();
@@ -2380,6 +2622,51 @@ public class EditorController {
         int m = (int) seconds / 60;
         int s = (int) seconds % 60;
         return String.format("%02d:%02d", m, s);
+    }
+
+    // --- MÉTODOS AUXILIARES PARA MULTI-TRACKING ---
+
+    // Busca el objeto detectado (humano) más cercano a un punto (x, y)
+    private DetectedObjects.DetectedObject findClosestHuman(List<DetectedObjects.DetectedObject> results,
+                                                            double targetX, double targetY,
+                                                            double vDW, double vDH, double oX, double oY) {
+        DetectedObjects.DetectedObject bestMatch = null;
+        double minDst = 100.0; // Radio de búsqueda individual
+        double AI_REF = 640.0;
+
+        for (var obj : results) {
+            if (!obj.getClassName().equals("person")) continue;
+
+            var r = obj.getBoundingBox().getBounds();
+            // Convertir coordenadas de IA a Pantalla
+            double screenX = ((r.getX() + r.getWidth()/2.0) / AI_REF) * vDW + oX;
+            double screenY = ((r.getY() + r.getHeight()) / AI_REF) * vDH + oY;
+
+            double dist = Math.sqrt(Math.pow(targetX - screenX, 2) + Math.pow(targetY - screenY, 2));
+
+            if (dist < minDst) {
+                minDst = dist;
+                bestMatch = obj;
+            }
+        }
+        return bestMatch;
+    }
+
+    // Convierte un objeto detectado (IA) a coordenadas de pantalla (Pies)
+    private java.awt.Point.Double convertToScreenCoords(DetectedObjects.DetectedObject obj,
+                                                        double vDW, double vDH, double oX, double oY) {
+        double AI_REF = 640.0;
+        var r = obj.getBoundingBox().getBounds();
+
+        double boxX = (r.getX() / AI_REF) * vDW + oX;
+        double boxY = (r.getY() / AI_REF) * vDH + oY;
+        double boxW = (r.getWidth() / AI_REF) * vDW;
+        double boxH = (r.getHeight() / AI_REF) * vDH;
+
+        double feetX = boxX + (boxW / 2.0);
+        double feetY = boxY + boxH;
+
+        return new java.awt.Point.Double(feetX, feetY);
     }
 
 }

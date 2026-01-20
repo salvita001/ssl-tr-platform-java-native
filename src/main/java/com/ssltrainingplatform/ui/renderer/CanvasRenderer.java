@@ -13,7 +13,9 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.transform.Affine;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class CanvasRenderer {
 
@@ -26,7 +28,8 @@ public class CanvasRenderer {
     // =========================================================
     //   1. DIBUJO EN PANTALLA (EDITOR)
     // =========================================================
-    public void drawShape(Image vidImg, double vidDispW, double vidDispH, double offX, double offY, DrawingShape s, Color c, double size, double x1, double y1, double x2, double y2) {
+    public void drawShape(Image vidImg, double vidDispW, double vidDispH, double offX, double offY, DrawingShape s,
+                          Color c, double size, double x1, double y1, double x2, double y2) {
 
         // --- COHERENCIA VISUAL ---
         // Calculamos un grosor unificado basado en el slider 'size'.
@@ -118,18 +121,98 @@ public class CanvasRenderer {
                 }
                 break;
             case "tracking":
-                double triSize = 14;
-                gcDraw.setFill(c);
-                double[] xPts = {x1, x1 - triSize/2, x1 + triSize/2 };
-                double[] yPts = { y1 - 5, y1 - 20, y1 - 20 };
-                gcDraw.fillPolygon(xPts, yPts, 3);
+                // Coordenadas
+                double feetX = x2;
+                double feetY = y2;
+                double headX = x2;
+                double headY = y1;
 
-                double radius = 25.0;
+                // --- 1. ELIPSE GIGANTE (40% de la altura) ---
+                double currentHeight = (y2 - y1);
+
+                // AUMENTADO: De 0.30 a 0.40
+                double radius = currentHeight * 0.40;
+
+                // Ampliamos límites para que no se corte si el jugador es muy grande
+                if (radius < 25) radius = 25;
+                if (radius > 120) radius = 120; // Límite superior subido
+
+                gcDraw.setLineWidth(3.0);
                 gcDraw.setStroke(c);
-                gcDraw.setLineWidth(2);
-                gcDraw.strokeOval(x2 - radius, y2 - (radius * 0.4), radius * 2, radius * 0.8);
-                gcDraw.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.25));
-                gcDraw.fillOval(x2 - radius, y2 - (radius * 0.4), radius * 2, radius * 0.8);
+
+                // Dibujamos la elipse
+                gcDraw.strokeOval(feetX - radius, feetY - (radius * 0.4), radius * 2, radius * 0.8);
+
+                gcDraw.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.35));
+                gcDraw.fillOval(feetX - radius, feetY - (radius * 0.4), radius * 2, radius * 0.8);
+
+                // --- 2. TRIÁNGULO MÁS PEQUEÑO ---
+                // REDUCIDO: De 0.5 a 0.3 veces el radio.
+                // Al ser el radio más grande, necesitamos bajar mucho este factor para que el triángulo encoja.
+                double triSize = radius * 0.30;
+
+                // Límite mínimo para que no desaparezca
+                if (triSize < 12) triSize = 12;
+
+                double[] xPts = { headX, headX - triSize/2, headX + triSize/2 };
+                double[] yPts = { headY - 10, headY - 10 - triSize, headY - 10 - triSize };
+
+                gcDraw.setFill(c);
+                gcDraw.fillPolygon(xPts, yPts, 3);
+                break;
+            case "line_defense":
+                // 1. Estilo de Línea Conectora
+                gcDraw.setStroke(c);
+                gcDraw.setLineWidth(3.0); // Grosor fijo para que se vea bien
+                gcDraw.setLineCap(StrokeLineCap.ROUND);
+                gcDraw.setLineJoin(javafx.scene.shape.StrokeLineJoin.ROUND);
+
+                List<java.awt.Point.Double> points = s.getKeyPoints();
+                if (points == null || points.isEmpty()) break;
+
+                // 2. Dibujar la línea que une los pies
+                gcDraw.beginPath();
+                gcDraw.moveTo(points.get(0).x, points.get(0).y);
+                for (int i = 1; i < points.size(); i++) {
+                    gcDraw.lineTo(points.get(i).x, points.get(i).y);
+                }
+                gcDraw.stroke();
+
+                // 3. Recuperar alturas (guardadas en el Controller durante el tracking)
+                java.util.Map<Integer, Double> heights = (s.getUserData() instanceof java.util.Map)
+                        ? (java.util.Map<Integer, Double>) s.getUserData()
+                        : new java.util.HashMap<>();
+
+                double defH = 60.0; // Altura por defecto si no hay tracking
+
+                // 4. Dibujar marcadores por jugador (Círculo Base + Triángulo Cabeza)
+                for (int i = 0; i < points.size(); i++) {
+                    double fx = points.get(i).x; // Pies X
+                    double fy = points.get(i).y; // Pies Y
+
+                    // Altura específica de este jugador (o default)
+                    double h = heights.getOrDefault(i, defH);
+                    double head_Y = fy - h;
+
+                    // A. CÍRCULO BASE
+                    double rx = 15; double ry = 7;
+                    gcDraw.setLineWidth(2);
+                    gcDraw.setStroke(c);
+                    gcDraw.strokeOval(fx - rx, fy - ry, rx * 2, ry * 2);
+                    gcDraw.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.3)); // Relleno suave
+                    gcDraw.fillOval(fx - rx, fy - ry, rx * 2, ry * 2);
+
+                    // B. TRIÁNGULO CABEZA (Invertido apuntando a la cabeza)
+                    double tSize = 8;
+                    double tBaseY = head_Y - 5; // Un poco por encima de la cabeza
+
+                    // Coordenadas: Punta abajo, Base arriba
+                    double[] xT = { fx, fx - tSize, fx + tSize };
+                    double[] yT = { tBaseY, tBaseY - tSize*1.5, tBaseY - tSize*1.5 };
+
+                    gcDraw.setFill(c); // Color sólido del picker
+                    gcDraw.fillPolygon(xT, yT, 3);
+                }
                 break;
             default:
                 gcDraw.setLineWidth(unifiedStroke);
@@ -226,6 +309,109 @@ public class CanvasRenderer {
                 if (backgroundImage != null)
                     drawRealZoom(gc, x1, y1, x2, y2, c, backgroundImage, sx,
                             0, 0, exportW, exportH, false);
+                break;
+            case "tracking":
+                // --- 1. CONFIGURACIÓN ---
+                double radius = 30.0;
+                if (sx != 0) radius *= sx; // Ajuste para exportación si sx (escala) es distinto de 0
+                double heightRatio = 0.5; // Círculo achatado (perspectiva)
+
+                // Coordenadas: (x2, y2) son los pies (Kalman), (x1, y1) será la cabeza
+                double feetX = x2;
+                double feetY = y2;
+                double headX = x2; // Centramos el triángulo horizontalmente con los pies
+                double headY = y1;
+
+                // --- 2. DIBUJAR CÍRCULO EN LOS PIES ---
+                gc.setLineWidth(3.0 * (sx != 0 ? sx : 1.0));
+                gc.setStroke(c);
+                gc.strokeOval(feetX - radius, feetY - (radius * heightRatio), radius * 2, radius * 2 * heightRatio);
+
+                gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.35));
+                gc.fillOval(feetX - radius, feetY - (radius * heightRatio), radius * 2, radius * 2 * heightRatio);
+
+                // --- 3. DIBUJAR TRIÁNGULO EN LA CABEZA ---
+                double triSize = 14.0 * (sx != 0 ? sx : 1.0);
+                // El triángulo flota un poco por encima de y1
+                double triBaseY = headY - 10;
+
+                double[] xPts = { headX, headX - triSize/2, headX + triSize/2 };
+                double[] yPts = { triBaseY + triSize, triBaseY, triBaseY }; // Triángulo invertido (apunta abajo)
+
+                // O si prefieres que apunte al jugador (V):
+                // double[] yPts = { triBaseY + triSize, triBaseY, triBaseY };
+                // Ajuste clásico (triángulo sólido encima):
+                double[] yTri = { headY - 5, headY - 20, headY - 20 };
+
+                gc.setFill(c);
+                gc.fillPolygon(xPts, yTri, 3);
+
+                // Opcional: Línea fina que une triángulo y círculo (estilo TV pro)
+                // gcDraw.setLineWidth(1);
+                // gcDraw.strokeLine(feetX, feetY - (radius*heightRatio), headX, headY - 5);
+                break;
+
+            case "line_defense":
+                gc.setStroke(c);
+                gc.setLineWidth(3.0 * sx); // Escalamos grosor
+                gc.setLineCap(StrokeLineCap.ROUND);
+                gc.setLineJoin(javafx.scene.shape.StrokeLineJoin.ROUND);
+
+                List<java.awt.Point.Double> rawPts = s.getKeyPoints();
+                if (rawPts == null || rawPts.isEmpty()) break;
+
+                // Pre-calcular puntos escalados
+                double[] sX = new double[rawPts.size()];
+                double[] sY = new double[rawPts.size()];
+
+                for(int i=0; i<rawPts.size(); i++) {
+                    sX[i] = (rawPts.get(i).x - offX) * sx;
+                    sY[i] = (rawPts.get(i).y - offY) * sy;
+                }
+
+                // 1. Dibujar línea conectora escalada
+                gc.beginPath();
+                gc.moveTo(sX[0], sY[0]);
+                for (int i = 1; i < rawPts.size(); i++) {
+                    gc.lineTo(sX[i], sY[i]);
+                }
+                gc.stroke();
+
+                // 2. Alturas
+                Map<Integer, Double> expHeights = (s.getUserData() instanceof Map)
+                        ? (Map<Integer, Double>) s.getUserData()
+                        : new HashMap<>();
+                double expDefH = 60.0;
+
+                // 3. Marcadores escalados
+                for (int i = 0; i < rawPts.size(); i++) {
+                    double fx = sX[i];
+                    double fy = sY[i];
+
+                    // Importante: Escalar la altura verticalmente
+                    double rawH = expHeights.getOrDefault(i, expDefH);
+                    double h = rawH * sy;
+                    double head_Y = fy - h;
+
+                    // A. CÍRCULO BASE
+                    double rx = 15 * sx;
+                    double ry = 7 * sy;
+                    gc.setLineWidth(2 * sx);
+                    gc.setStroke(c);
+                    gc.strokeOval(fx - rx, fy - ry, rx * 2, ry * 2);
+                    gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.3));
+                    gc.fillOval(fx - rx, fy - ry, rx * 2, ry * 2);
+
+                    // B. TRIÁNGULO CABEZA
+                    double tSize = 8 * sx;
+                    double tBaseY = head_Y - (5 * sy);
+
+                    double[] xT = { fx, fx - tSize, fx + tSize };
+                    double[] yT = { tBaseY, tBaseY - tSize*1.5, tBaseY - tSize*1.5 };
+
+                    gc.setFill(c);
+                    gc.fillPolygon(xT, yT, 3);
+                }
                 break;
         }
     }

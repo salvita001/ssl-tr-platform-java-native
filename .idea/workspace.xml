@@ -7,8 +7,11 @@
     <list default="true" id="4158da3a-2dc1-4b12-b50c-8b73e666fd65" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/controller/EditorController.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/controller/EditorController.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/service/LocalExportService.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/service/LocalExportService.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/model/DrawingShape.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/model/DrawingShape.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/ui/renderer/CanvasRenderer.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/ui/renderer/CanvasRenderer.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/util/AppIcons.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/util/AppIcons.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/resources/layout.fxml" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/resources/layout.fxml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/resources/style.css" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/resources/style.css" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -67,8 +70,8 @@
       <recent name="$PROJECT_DIR$/src/main/java/com/ssltrainingplatform/model" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
-      <recent name="$PROJECT_DIR$/src/main/resources/bin/mac" />
       <recent name="$PROJECT_DIR$/models" />
+      <recent name="$PROJECT_DIR$/src/main/resources/bin/mac" />
     </key>
   </component>
   <component name="RunAnythingCache">
@@ -136,7 +139,7 @@
       <workItem from="1768474648977" duration="55000" />
       <workItem from="1768475380560" duration="789000" />
       <workItem from="1768476176234" duration="492000" />
-      <workItem from="1768476675506" duration="32121000" />
+      <workItem from="1768476675506" duration="58052000" />
     </task>
     <servers />
   </component>

@@ -1,5 +1,8 @@
 package com.ssltrainingplatform.model;
 
+import com.ssltrainingplatform.util.SimpleKalmanTracker;
+
+import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -25,6 +28,49 @@ public class DrawingShape {
     // Contenido específico
     private String textValue; // Para herramienta Texto
     private List<Double> points = new ArrayList<>(); // Para Polígono, Muro, Lápiz y Curva
+
+    private Object userData;
+
+    // --- NUEVO: ESTRUCTURAS PARA HERRAMIENTAS MULTI-PUNTO (Como Line Defense) ---
+
+    // Lista de puntos clave. Para una línea defensiva de 4 jugadores, tendrá 4 puntos.
+    private List<Point.Double> keyPoints = new ArrayList<>();
+
+    // Lista de trackers, uno para cada punto clave.
+    // NO SE GUARDA EN JSON (es "transient"). Se regenera en tiempo de ejecución.
+    private transient List<SimpleKalmanTracker> internalTrackers = new ArrayList<>();
+
+    // --- MÉTODOS NUEVOS ---
+
+    public void addKeyPoint(double x, double y) {
+        this.keyPoints.add(new Point.Double(x, y));
+        // Al añadir un punto, creamos su tracker correspondiente
+        this.internalTrackers.add(new SimpleKalmanTracker(x, y));
+    }
+
+    public List<Point.Double> getKeyPoints() {
+        return keyPoints;
+    }
+
+    // Método vital para el tracking: devuelve los trackers internos
+    public List<SimpleKalmanTracker> getInternalTrackers() {
+        // Seguridad: Si cargamos de JSON, la lista puede ser null. Inicializarla.
+        if (internalTrackers == null) {
+            internalTrackers = new ArrayList<>();
+            // Si hay puntos pero no trackers, los creamos (recuperación tras cargar)
+            for (Point.Double p : keyPoints) {
+                internalTrackers.add(new SimpleKalmanTracker(p.x, p.y));
+            }
+        }
+        return internalTrackers;
+    }
+
+    // Actualiza la posición de un punto específico después del tracking
+    public void updateKeyPointPosition(int index, double newX, double newY) {
+        if (index >= 0 && index < keyPoints.size()) {
+            keyPoints.get(index).setLocation(newX, newY);
+        }
+    }
 
     public DrawingShape(String id, String type, double startX, double startY, String color) {
         this.id = id;
@@ -165,4 +211,12 @@ public class DrawingShape {
 
     public List<Double> getPoints() { return points; }
     public void setPoints(List<Double> points) { this.points = points; }
+
+    public Object getUserData() {
+        return userData;
+    }
+
+    public void setUserData(Object userData) {
+        this.userData = userData;
+    }
 }

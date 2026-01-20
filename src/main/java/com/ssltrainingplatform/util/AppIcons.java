@@ -66,6 +66,31 @@ public class AppIcons {
                 "M3,16 v5 H8 v-1.5 H4.5 V16 z " +   // Bottom-Left
                 "M16,21 H21 V16 h-1.5 v3.5 H16 z";  // Bottom-Right            case "base" -> "M2,12a10,5 0 1,0 20,0a10,5 0 1,0 -20,0 M6,12a6,3 0 1,1 12,0a6,3 0 1,1 -12,0"; // Elipse con punto central
 
+            // --- NUEVO ICONO PARA MULTI-TRACKING ---
+            case "line-defense" ->
+                // 1. LÍNEA CONECTORA (Diagonal más gruesa y larga)
+                "M5,5 L19,19 L18,20 L4,6 z " +
+                // --- FIGURA 1 (Arriba Izquierda - Aumentada) ---
+                // Cabeza (Radio 2)
+                "M6,8 a2,2 0 1,0 0,-4 a2,2 0 1,0 0,4 " +
+                // Cuerpo (Más ancho)
+                "M6,8.5 c-3,0 -4,1 -4,3 v1 h8 v-1 c0,-2 -1,-3 -4,-3 " +
+                // Esquinas de enfoque (Más grandes y gruesas)
+                "M1,5 V1 H5 v1.5 H2.5 V5 z " +   // Top-Left
+                "M7,1 H11 V5 h-1.5 V2.5 H7 z " + // Top-Right
+                "M1,7 v4 H5 v-1.5 H2.5 V7 z " +  // Bottom-Left
+                "M7,11 H11 V7 h-1.5 v2.5 H7 z " +// Bottom-Right
+
+                // --- FIGURA 2 (Abajo Derecha - Aumentada) ---
+                // Cabeza
+                "M18,20 a2,2 0 1,0 0,-4 a2,2 0 1,0 0,4 " +
+                // Cuerpo
+                "M18,20.5 c-3,0 -4,1 -4,3 v1 h8 v-1 c0,-2 -1,-3 -4,-3 " +
+                // Esquinas de enfoque
+                "M13,17 V13 H17 v1.5 H14.5 V17 z " +  // Top-Left
+                "M19,13 H23 V17 h-1.5 V14.5 H19 z " + // Top-Right
+                "M13,19 v4 H17 v-1.5 H14.5 V19 z " +  // Bottom-Left
+                "M19,23 H23 V19 h-1.5 v2.5 H19 z";    // Bottom-Right
             // --- FILA 7: Muro y Rectángulo Relleno ---
             case "wall" -> // Poste izquierdo
                 "M6,10 h1.5 v10 h-1.5 z " +

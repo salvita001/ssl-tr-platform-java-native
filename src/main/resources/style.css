@@ -10,7 +10,7 @@
     -fx-border-radius: 10;
 }
 
-.sidebar-label { -fx-text-fill: #666; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 5 0; }
+.sidebar-label { -fx-text-fill: #666; -fx-font-weight: bold; -fx-font-size: 14px; -fx-padding: 5 0; }
 
 .tool-button { -fx-background-color: #2a2a2a; -fx-background-radius: 10; -fx-cursor: hand; }
 .tool-button:selected { -fx-background-color: #bbbbbb; }

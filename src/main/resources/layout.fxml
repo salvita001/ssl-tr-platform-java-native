@@ -39,8 +39,22 @@
                         <Insets left="20" />
                     </StackPane.margin>
                     <children>
-                        <Label text="TOOLS" styleClass="sidebar-label" />
+                        <HBox alignment="CENTER" spacing="10" style="-fx-padding: 10 0 5 0;">
+                            <children>
+                                <Button fx:id="btnUndo" onAction="#onUndo" prefWidth="42" prefHeight="42"
+                                        styleClass="tool-button" style="-fx-base: #444;">
+                                    <tooltip><Tooltip text="Deshacer (Ctrl+Z)"/></tooltip>
+                                </Button>
+                                <Button fx:id="btnRedo" onAction="#onRedo" prefWidth="42" prefHeight="42"
+                                        styleClass="tool-button" style="-fx-base: #444;">
+                                    <tooltip><Tooltip text="Rehacer (Ctrl+Y)"/></tooltip>
+                                </Button>
+                            </children>
+                        </HBox>
 
+                        <Separator opacity="0.1" />
+
+                        <Label text="TOOLS" styleClass="sidebar-label" />
                         <GridPane hgap="12" vgap="12" alignment="CENTER">
                             <children>
                                 <ToggleButton fx:id="btnCursor" onAction="#setToolCursor" prefWidth="42" prefHeight="42" styleClass="tool-button" selected="true" GridPane.columnIndex="0" GridPane.rowIndex="0">
@@ -66,18 +80,19 @@
                                 <ToggleButton fx:id="btnBase" onAction="#setToolBase" prefWidth="42" prefHeight="42" styleClass="tool-button" toggleGroup="$toolsGroup" GridPane.columnIndex="0" GridPane.rowIndex="6"/>
                                 <ToggleButton fx:id="btnRectShaded" onAction="#setToolRectShaded" prefWidth="42" prefHeight="42" styleClass="tool-button" toggleGroup="$toolsGroup" GridPane.columnIndex="1" GridPane.rowIndex="6"/>
 
+                                <ToggleButton fx:id="btnLineDefense" onAction="#setToolLineDefense" prefWidth="42"
+                                                 prefHeight="42" styleClass="tool-button" toggleGroup="$toolsGroup"
+                                                 GridPane.columnIndex="0" GridPane.rowIndex="7"/>
+
                                 <ToggleButton fx:id="btnDeleteShape" onAction="#onDeleteSelectedShape"
                                               prefWidth="42" prefHeight="42" styleClass="tool-button"
-                                              toggleGroup="$toolsGroup" GridPane.columnIndex="0" GridPane.rowIndex="7"/>
+                                              toggleGroup="$toolsGroup" GridPane.columnIndex="0" GridPane.rowIndex="8"/>
 
                                 <ToggleButton fx:id="btnClearCanvas" onAction="#onClearAllShapes"
                                               prefWidth="42" prefHeight="42" styleClass="tool-button"
-                                              toggleGroup="$toolsGroup" GridPane.columnIndex="1" GridPane.rowIndex="7"/>
-
+                                              toggleGroup="$toolsGroup" GridPane.columnIndex="1" GridPane.rowIndex="8"/>
                             </children>
                         </GridPane>
-
-                        <Separator opacity="0.1" />
 
                         <VBox alignment="CENTER" spacing="5">
                             <children>
