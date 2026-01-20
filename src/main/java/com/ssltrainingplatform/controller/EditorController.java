@@ -367,22 +367,38 @@ public class EditorController {
         // ✅ LÓGICA AUTOMÁTICA: El panel solo se ve si no hay vídeo cargado
         placeholderView.visibleProperty().bind(videoView.imageProperty().isNull());
 
-        timelineCanvas.setOnMouseMoved(e -> {
-            double scrollOffset = timelineScroll.getValue();
+        // -----------------------------------------------------------------
+        // ✅ SOLUCIÓN MAESTRA: Redibujar canvas automáticamente cuando cambie el frame
+        // Esto garantiza que en cuanto el seek termine y cargue la foto, la veamos.
+        videoView.imageProperty().addListener((obs, oldImg, newImg) -> {
+            if (newImg != null) {
+                redrawVideoCanvas();
+            }
+        });
 
+        timelineCanvas.setOnMouseMoved(e -> {
+            // 1. Calcular tiempo bajo el ratón (Línea Gris)
+            double scrollOffset = timelineScroll.getValue();
             hoverTime = (e.getX() + scrollOffset) / pixelsPerSecond;
-            // 2. ✅ LÓGICA DE LIVE PREVIEW (SCRUBBING)
+
             long now = System.currentTimeMillis();
-            // Throttling: Solo actualizamos el vídeo cada 30ms para fluidez
-            if (now - lastScrubTime > 30) {
-                seekTimeline(e.getX());
+
+            // 2. SCRUBBING: Actualizar video solo cada 100ms
+            if (now - lastScrubTime > 100) {
+                // ¡AQUÍ EL CAMBIO! Usamos el método que SOLO previsualiza
+                previewVideoOnly(hoverTime);
                 lastScrubTime = now;
             }
-            redrawTimeline();
+
+            redrawTimeline(); // Dibuja la línea gris en hoverTime y la roja en su sitio
         });
 
         timelineCanvas.setOnMouseExited(e -> {
             hoverTime = -1;
+
+            // 3. AL SALIR: El video vuelve a la posición real de la aguja roja
+            previewVideoOnly(currentTimelineTime);
+
             redrawTimeline();
         });
 
@@ -577,15 +593,17 @@ public class EditorController {
     }
 
     private void onTimelinePressed(MouseEvent e) {
-
         autoSaveActiveSegmentDrawings();
+
+        // 1. MOVIMIENTO INMEDIATO DEL PLAYHEAD Y VIDEO
+        // Esto asegura que "lo lleve allí" siempre, antes de calcular selecciones
+        seekTimeline(e.getX(), true);
 
         double scrollOffset = timelineScroll.getValue();
         double clickTime = (e.getX() + scrollOffset) / pixelsPerSecond;
 
         if (timelineContextMenu != null) timelineContextMenu.hide();
 
-        // A. BUSCAR QUÉ SEGMENTO SE HA PINCHADO
         VideoSegment clickedSeg = null;
         for (VideoSegment seg : timelineManager.getSegments()) {
             if (clickTime >= seg.getStartTime() && clickTime <= seg.getEndTime()) {
@@ -594,9 +612,9 @@ public class EditorController {
             }
         }
 
-        // B. TRATAMIENTO SEGÚN EL BOTÓN
+        // Clic Derecho
         if (e.getButton() == MouseButton.SECONDARY) {
-            selectedSegment = clickedSeg; // Seleccionar para el menú contextual
+            selectedSegment = clickedSeg;
             if (selectedSegment != null) {
                 timelineContextMenu.show(timelineCanvas, e.getScreenX(), e.getScreenY());
             }
@@ -604,18 +622,15 @@ public class EditorController {
             return;
         }
 
-        // C. CLIC IZQUIERDO (Selección y Arrastre)
-        selectedSegment = clickedSeg; // ✅ AHORA SE SELECCIONA AL HACER CLIC
+        // Clic Izquierdo (Selección)
+        selectedSegment = clickedSeg;
         segmentBeingDragged = null;
         isDraggingTimeline = false;
 
         if (clickedSeg != null) {
-            // ✅ GUARDAR ESTADO ANTES DE MOVER (Para Undo paso a paso)
             saveState();
             segmentBeingDragged = clickedSeg;
             currentDragX = e.getX();
-        } else {
-            seekTimeline(e.getX());
         }
 
         redrawTimeline();
@@ -1713,7 +1728,7 @@ public class EditorController {
             gcTimeline.setLineWidth(1.0);
             gcTimeline.strokeLine(hX, 0, hX, h);
 
-            String timeText = formatPreciseTime(hoverTime);
+            /*String timeText = formatPreciseTime(hoverTime);
 
             gcTimeline.setFont(Font.font("Arial", FontWeight.BOLD, 10));
             Text temp = new Text(timeText);
@@ -1732,7 +1747,7 @@ public class EditorController {
             gcTimeline.strokeRoundRect(rectX, rectY, rectW, rectH, 5, 5);
 
             gcTimeline.setFill(Color.WHITE);
-            gcTimeline.fillText(timeText, rectX + 5, rectY + 12);
+            gcTimeline.fillText(timeText, rectX + 5, rectY + 12);*/
         }
     }
 
@@ -1862,7 +1877,7 @@ public class EditorController {
             gcTimeline.setStroke(Color.web("#ffffff", 0.3));
             gcTimeline.strokeLine(hX, 0, hX, h);
 
-            String timeStr = formatPreciseTime(hoverTime);
+            /*String timeStr = formatPreciseTime(hoverTime);
             gcTimeline.setFont(Font.font("Arial", FontWeight.BOLD, 9));
 
             double rectW = 34; double rectH = 14;
@@ -1872,7 +1887,7 @@ public class EditorController {
             gcTimeline.setFill(Color.web("#1a1a1a", 0.9));
             gcTimeline.fillRoundRect(rectX, rectY, rectW, rectH, 4, 4);
             gcTimeline.setFill(Color.WHITE);
-            gcTimeline.fillText(timeStr, rectX + 4, rectY + 10);
+            gcTimeline.fillText(timeStr, rectX + 4, rectY + 10);*/
         }
 
         double phX = (currentTimelineTime * pixelsPerSecond) - scrollOffset;
@@ -2006,46 +2021,58 @@ public class EditorController {
         videoService.seek(percent);
     }
 
-    private void seekTimeline(double mouseX) {
+    private void seekTimeline(double mouseX, boolean updateVideo) {
         resetTracking();
-        autoSaveActiveSegmentDrawings();
 
         double scrollOffset = timelineScroll.getValue();
         double time = (mouseX + scrollOffset) / pixelsPerSecond;
 
-        // 1. Validaciones con el Manager
+        // 1. Validaciones
         if (time < 0) time = 0;
-        double totalDur = timelineManager.getTotalDuration(); // <-- CAMBIO
+        double totalDur = timelineManager.getTotalDuration();
         if (time > totalDur) time = totalDur;
 
+        // 2. Actualizamos variable de tiempo siempre
         currentTimelineTime = time;
 
-        // 2. Buscamos segmento bajo el cabezal
-        VideoSegment targetSeg = timelineManager.getSegmentAt(time); // <-- CAMBIO
+        // 3. ACTUALIZAR VIDEO
+        if (updateVideo) {
+            // ¡IMPORTANTE! Desbloqueamos las actualizaciones visuales inmediatamente
+            ignoreUpdatesUntil = 0;
 
-        // Necesitamos la duración original para calcular porcentajes
-        double totalOrgDur = timelineManager.getTotalOriginalDuration(); // <-- CAMBIO
+            VideoSegment targetSeg = timelineManager.getSegmentAt(time);
+            double totalOrgDur = timelineManager.getTotalOriginalDuration();
+            double seekTarget = 0;
 
-        if (targetSeg != null) {
-            // --- CASO A: CLICK SOBRE UN CLIP ---
-            double offset = time - targetSeg.getStartTime();
-            double seekTarget = targetSeg.getSourceStartTime() + offset;
-            performSafeSeek((seekTarget / totalOrgDur) * 100.0);
-        } else {
-            // --- CASO B: CLICK EN UN HUECO (GAP) ---
-            VideoSegment nextSeg = timelineManager.getNextSegment(null, time);
-
-            if (nextSeg != null) {
-                performSafeSeek((nextSeg.getSourceStartTime() / totalOrgDur) * 100.0);
+            if (targetSeg != null) {
+                // Sobre un clip
+                double offset = time - targetSeg.getStartTime();
+                seekTarget = targetSeg.getSourceStartTime() + offset;
+            } else {
+                // En un hueco
+                VideoSegment nextSeg = timelineManager.getNextSegment(null, time);
+                if (nextSeg != null) {
+                    seekTarget = nextSeg.getSourceStartTime();
+                }
             }
+
+            // Usamos seek directo (sin safeSeek) para respuesta inmediata
+            if (totalOrgDur > 0) {
+                videoService.seek((seekTarget / totalOrgDur) * 100.0);
+            }
+
+            Platform.runLater(() -> {
+                checkPlaybackJump();
+                redrawVideoCanvas();
+                updateTimeLabel();
+            });
         }
 
-        Platform.runLater(() -> {
-            checkPlaybackJump();
-            redrawTimeline();
-            redrawVideoCanvas();
+        redrawTimeline();
+
+        if (!updateVideo) {
             updateTimeLabel();
-        });
+        }
     }
 
     @FXML
@@ -2352,24 +2379,24 @@ public class EditorController {
     }
 
     private void onTimelineDragged(MouseEvent e) {
-
-        double topMargin = 22;
         double canvasW = timelineCanvas.getWidth();
         double edgeThreshold = 70.0;
         double scrollOffset = timelineScroll.getValue();
 
-        if (segmentBeingDragged != null && e.getY() >= topMargin) {
+        // CASO A: MOVER UN CLIP (Si estamos arrastrando un segmento)
+        if (segmentBeingDragged != null) {
             isDraggingTimeline = true;
             currentDragX = e.getX();
 
+            // Auto-scroll al llegar a los bordes
             if (e.getX() > canvasW - edgeThreshold) {
                 timelineScroll.setValue(scrollOffset + 15);
             } else if (e.getX() < edgeThreshold && scrollOffset > 0) {
                 timelineScroll.setValue(scrollOffset - 15);
             }
 
+            // Cálculo de dónde va a caer el clip (Drop Indicator)
             double mousePosTime = (e.getX() + timelineScroll.getValue()) / pixelsPerSecond;
-
             List<VideoSegment> others = new ArrayList<>(timelineManager.getSegments());
             others.remove(segmentBeingDragged);
 
@@ -2380,7 +2407,6 @@ public class EditorController {
                 for (int i = 0; i < others.size(); i++) {
                     VideoSegment s = others.get(i);
                     double midPoint = s.getStartTime() + (s.getDuration() / 2.0);
-
                     if (mousePosTime < midPoint) {
                         newDropIndex = i;
                         indicatorTime = s.getStartTime();
@@ -2391,16 +2417,22 @@ public class EditorController {
                     }
                 }
             }
-
             this.dropIndex = newDropIndex;
             this.dropIndicatorX = (indicatorTime * pixelsPerSecond) - timelineScroll.getValue();
 
             redrawTimeline();
 
-        } else {
+        }
+        // CASO B: SCRUBBING (Solo movemos la línea de tiempo)
+        else {
             long now = System.currentTimeMillis();
-            if (now - lastScrubTime > 30) {
-                seekTimeline(e.getX());
+
+            // 1. UI Inmediata
+            seekTimeline(e.getX(), false);
+
+            // 2. Video Controlado (Subimos a 100ms para dar tiempo a cargar el frame)
+            if (now - lastScrubTime > 100) { // <--- CAMBIO AQUÍ (75 -> 100)
+                seekTimeline(e.getX(), true);
                 lastScrubTime = now;
             }
         }
@@ -2667,6 +2699,36 @@ public class EditorController {
         double feetY = boxY + boxH;
 
         return new java.awt.Point.Double(feetX, feetY);
+    }
+
+    // --- NUEVO MÉTODO: Solo mueve el video visualmente (Previsualización) ---
+    // NO actualiza currentTimelineTime, por lo que la aguja roja no se mueve.
+    private void previewVideoOnly(double time) {
+        // 1. Validar límites
+        double totalDur = timelineManager.getTotalDuration();
+        if (time < 0) time = 0;
+        if (time > totalDur) time = totalDur;
+
+        // 2. Calcular qué frame mostrar (Lógica idéntica a seekTimeline)
+        VideoSegment targetSeg = timelineManager.getSegmentAt(time);
+        double totalOrgDur = timelineManager.getTotalOriginalDuration();
+        double seekTarget = 0;
+
+        if (targetSeg != null) {
+            double offset = time - targetSeg.getStartTime();
+            seekTarget = targetSeg.getSourceStartTime() + offset;
+        } else {
+            VideoSegment nextSeg = timelineManager.getNextSegment(null, time);
+            if (nextSeg != null) {
+                seekTarget = nextSeg.getSourceStartTime();
+            }
+        }
+
+        // 3. Mover el video (IMPORTANTE: Desbloquear actualizaciones)
+        if (totalOrgDur > 0) {
+            ignoreUpdatesUntil = 0;
+            videoService.seek((seekTarget / totalOrgDur) * 100.0);
+        }
     }
 
 }
