@@ -1252,7 +1252,11 @@ public class EditorController {
         double offX = (canvasW - vidDispW) / 2.0;
         double offY = (canvasH - vidDispH) / 2.0;
 
-        gcDraw.drawImage(vidImg, offX, offY, vidDispW, vidDispH);
+        if (activeSeg != null && activeSeg.isFreezeFrame()) {
+            gcDraw.drawImage(vidImg, offX, offY, vidDispW, vidDispH);
+        }
+
+        // gcDraw.drawImage(vidImg, offX, offY, vidDispW, vidDispH);
 
         // Permitimos dibujar las cajas MIENTRAS se reproduce para depurar
         if (btnToggleAI.isSelected() && currentTool == ToolType.TRACKING && currentDetections != null) {
@@ -1449,7 +1453,7 @@ public class EditorController {
                     updateTimeLabel();
                     redrawTimeline();
                     checkAutoScroll();
-                    redrawVideoCanvas();
+                    // redrawVideoCanvas();
                 });
             }
         });
@@ -2063,7 +2067,7 @@ public class EditorController {
 
             Platform.runLater(() -> {
                 checkPlaybackJump();
-                redrawVideoCanvas();
+                // redrawVideoCanvas();
                 updateTimeLabel();
             });
         }
@@ -2441,19 +2445,28 @@ public class EditorController {
     private void initTimelineContextMenu() {
         timelineContextMenu = new ContextMenu();
 
+        // 1. Modificar Duración -> Icono: Reloj ("clock")
         MenuItem modifyTimeItem = new MenuItem("Modificar Duración");
+        modifyTimeItem.setGraphic(AppIcons.getIcon("clock", 16));
         modifyTimeItem.setOnAction(e -> onModifyFreezeDuration());
 
+        // 2. Añadir fotograma -> Icono: Cámara ("camera")
         MenuItem captureItem = new MenuItem("Añadir fotograma congelado");
+        captureItem.setGraphic(AppIcons.getIcon("camera", 16));
         captureItem.setOnAction(e -> onCaptureFrame());
 
+        // 3. Dividir clip -> Icono: Tijeras ("cut" o "scissors")
         MenuItem cutItem = new MenuItem("Dividir clip");
+        cutItem.setGraphic(AppIcons.getIcon("cut", 16));
         cutItem.setOnAction(e -> onCutVideo());
 
+        // 4. Eliminar -> Icono: Basura ("trash") - Ya usas "trash" en btnDeleteShape
         MenuItem deleteItem = new MenuItem("Eliminar");
-        deleteItem.setStyle("-fx-text-fill: #ff4444;");
+        deleteItem.setGraphic(AppIcons.getIcon("trash", 16));
+        deleteItem.setStyle("-fx-text-fill: #ff4444;"); // Mantenemos el texto rojo de alerta
         deleteItem.setOnAction(e -> onDeleteSegment());
 
+        // Añadimos todo al menú con separadores
         timelineContextMenu.getItems().addAll(
                 modifyTimeItem,
                 new SeparatorMenuItem(),
