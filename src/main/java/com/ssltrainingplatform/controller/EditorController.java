@@ -188,6 +188,10 @@ public class EditorController {
 
     @FXML private ToggleButton btnLineDefense;
 
+    // Variables para el control de fluidez (Smart Seek)
+    private boolean isSeeking = false;
+    private Double pendingSeekTime = null;
+
     // =========================================================================
     //                               INICIALIZACIÓN
     // =========================================================================
@@ -368,29 +372,35 @@ public class EditorController {
         placeholderView.visibleProperty().bind(videoView.imageProperty().isNull());
 
         // -----------------------------------------------------------------
-        // ✅ SOLUCIÓN MAESTRA: Redibujar canvas automáticamente cuando cambie el frame
-        // Esto garantiza que en cuanto el seek termine y cargue la foto, la veamos.
+        // ✅ SMART SEEK: Redibujar y procesar la cola de peticiones
+        // -----------------------------------------------------------------
         videoView.imageProperty().addListener((obs, oldImg, newImg) -> {
             if (newImg != null) {
                 redrawVideoCanvas();
+
+                // El video ya ha llegado, así que liberamos el bloqueo
+                isSeeking = false;
+
+                // Si había una petición pendiente (porque moviste el ratón mientras cargaba),
+                // la ejecutamos ahora mismo para no perder el ritmo.
+                if (pendingSeekTime != null) {
+                    double t = pendingSeekTime;
+                    pendingSeekTime = null; // Limpiamos la pendiente
+                    previewVideoSmart(t);   // Lanzamos la siguiente
+                }
             }
         });
 
         timelineCanvas.setOnMouseMoved(e -> {
-            // 1. Calcular tiempo bajo el ratón (Línea Gris)
+            // Calcular tiempo
             double scrollOffset = timelineScroll.getValue();
             hoverTime = (e.getX() + scrollOffset) / pixelsPerSecond;
 
-            long now = System.currentTimeMillis();
+            // ✅ CAMBIO: Ya no usamos "if (now - last > 33)".
+            // Llamamos directamente al método smart. Él gestionará la velocidad máxima.
+            previewVideoSmart(hoverTime);
 
-            // 2. SCRUBBING: Actualizar video solo cada 100ms
-            if (now - lastScrubTime > 100) {
-                // ¡AQUÍ EL CAMBIO! Usamos el método que SOLO previsualiza
-                previewVideoOnly(hoverTime);
-                lastScrubTime = now;
-            }
-
-            redrawTimeline(); // Dibuja la línea gris en hoverTime y la roja en su sitio
+            redrawTimeline();
         });
 
         timelineCanvas.setOnMouseExited(e -> {
@@ -427,6 +437,41 @@ public class EditorController {
 
         timelineCanvas.setCursor(Cursor.DEFAULT);
 
+    }
+
+    // Mueve el video solo si el motor está libre. Si no, guarda la petición.
+    private void previewVideoSmart(double time) {
+        // 1. Validar límites
+        double totalDur = timelineManager.getTotalDuration();
+        if (time < 0) time = 0;
+        if (time > totalDur) time = totalDur;
+
+        // 2. Si el motor está ocupado cargando un frame anterior...
+        if (isSeeking) {
+            pendingSeekTime = time; // ...guardamos este tiempo para ir después
+            return;                 // y salimos sin molestar al motor.
+        }
+
+        // 3. Si está libre, calculamos y movemos
+        VideoSegment targetSeg = timelineManager.getSegmentAt(time);
+        double totalOrgDur = timelineManager.getTotalOriginalDuration();
+        double seekTarget = 0;
+
+        if (targetSeg != null) {
+            double offset = time - targetSeg.getStartTime();
+            seekTarget = targetSeg.getSourceStartTime() + offset;
+        } else {
+            VideoSegment nextSeg = timelineManager.getNextSegment(null, time);
+            if (nextSeg != null) {
+                seekTarget = nextSeg.getSourceStartTime();
+            }
+        }
+
+        if (totalOrgDur > 0) {
+            isSeeking = true; // Bloqueamos hasta que llegue la imagen
+            ignoreUpdatesUntil = 0;
+            videoService.seek((seekTarget / totalOrgDur) * 100.0);
+        }
     }
 
     private void processMultiTrackingLogic(List<DetectedObjects.DetectedObject> results, boolean hasAIData) {
@@ -2473,16 +2518,11 @@ public class EditorController {
         }
         // CASO B: SCRUBBING (Solo movemos la línea de tiempo)
         else {
-            long now = System.currentTimeMillis();
-
-            // 1. UI Inmediata
+            // Movimiento visual inmediato
             seekTimeline(e.getX(), false);
 
-            // 2. Video Controlado (Subimos a 100ms para dar tiempo a cargar el frame)
-            if (now - lastScrubTime > 100) { // <--- CAMBIO AQUÍ (75 -> 100)
-                seekTimeline(e.getX(), true);
-                lastScrubTime = now;
-            }
+            // Movimiento de video inteligente (Sin timers)
+            previewVideoSmart((e.getX() + scrollOffset) / pixelsPerSecond);
         }
     }
 
