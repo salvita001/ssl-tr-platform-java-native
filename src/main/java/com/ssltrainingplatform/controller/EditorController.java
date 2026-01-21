@@ -2317,23 +2317,52 @@ public class EditorController {
 
     private String saveSnapshotToTempFile(VideoSegment seg) {
         try {
-            double exportW = 1280; double exportH = 720;
+            double exportW = 1280;
+            double exportH = 720;
+
             Canvas tempCanvas = new Canvas(exportW, exportH);
             GraphicsContext gc = tempCanvas.getGraphicsContext2D();
+
+            // 1. Fondo negro (para evitar transparencia rara)
+            gc.setFill(Color.BLACK);
+            gc.fillRect(0, 0, exportW, exportH);
 
             Image bg = seg.getThumbnail();
             if (bg == null) return null;
 
-            gc.drawImage(bg, 0, 0, exportW, exportH);
+            // 2. Calcular ESCALA REAL (Sin deformar la imagen)
+            double scaleW = exportW / bg.getWidth();
+            double scaleH = exportH / bg.getHeight();
+            double scale = Math.min(scaleW, scaleH); // Usamos el menor para que quepa entera
 
-            // Parámetros de escala originales
+            double finalW = bg.getWidth() * scale;
+            double finalH = bg.getHeight() * scale;
+            double destX = (exportW - finalW) / 2.0;
+            double destY = (exportH - finalH) / 2.0;
+
+            // Pintamos la imagen centrada
+            gc.drawImage(bg, destX, destY, finalW, finalH);
+
+            // 3. Calcular factores de conversión (Editor -> Export)
             double canvasW = drawCanvas.getWidth();
             double canvasH = drawCanvas.getHeight();
-            double scale = Math.min(canvasW / bg.getWidth(), canvasH / bg.getHeight());
-            double vidDispW = bg.getWidth() * scale;
-            double vidDispH = bg.getHeight() * scale;
-            double offX = (canvasW - vidDispW) / 2.0;
-            double offY = (canvasH - vidDispH) / 2.0;
+
+            // Replicamos la escala que tenía en el editor
+            double editorScale = Math.min(canvasW / bg.getWidth(), canvasH / bg.getHeight());
+            double editorVidW = bg.getWidth() * editorScale;
+            double editorVidH = bg.getHeight() * editorScale;
+
+            // Estos son los márgenes negros que tenías en el editor
+            double editorOffX = (canvasW - editorVidW) / 2.0;
+            double editorOffY = (canvasH - editorVidH) / 2.0;
+
+            // Factor de multiplicación
+            double sx = finalW / editorVidW;
+            double sy = finalH / editorVidH;
+
+            // PREPARAMOS EL CONTEXTO
+            gc.save();
+            gc.translate(destX, destY); // Movemos el lápiz al inicio de la imagen real
 
             List<DrawingShape> allToDraw = new ArrayList<>();
             List<DrawingShape> cached = annotationsCache.get(seg.getId());
@@ -2348,8 +2377,23 @@ public class EditorController {
             }
 
             for (DrawingShape s : allToDraw) {
-                drawShapeScaledToVideo(gc, s, offX, offY, vidDispW, vidDispH, exportW, exportH, bg);
+                // CORRECCIÓN CRUCIAL: Calculamos las coordenadas reales
+                double x1 = (s.getStartX() - editorOffX) * sx;
+                double y1 = (s.getStartY() - editorOffY) * sy;
+                double x2 = (s.getEndX() - editorOffX) * sx;
+                double y2 = (s.getEndY() - editorOffY) * sy;
+                double size = s.getStrokeWidth();
+
+                // Pasamos las coordenadas calculadas y los offsets del editor para las curvas internas
+                canvasRenderer.drawShapeOnGC(gc, s, bg,
+                        x1, y1, x2, y2,
+                        size,
+                        sx, sy,
+                        editorOffX, editorOffY,
+                        exportW, exportH);
             }
+
+            gc.restore();
 
             WritableImage snap = tempCanvas.snapshot(null, null);
             BufferedImage bImage = SwingFXUtils.fromFXImage(snap, null);

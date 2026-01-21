@@ -235,23 +235,36 @@ public class CanvasRenderer {
         Color c = Color.web(s.getColor());
         gc.setStroke(c);
         gc.setFill(c);
-        gc.setLineWidth(unifiedStroke);
+        gc.setLineWidth(unifiedStroke * sx); // Escalamos también el grosor
         gc.setLineCap(StrokeLineCap.ROUND);
 
         switch (s.getType()) {
             case "arrow":
-                drawProArrow(gc, x1, y1, x2, y2, c, scaledSize, unifiedStroke, false);
+                drawProArrow(gc, x1, y1, x2, y2, c, scaledSize * sx, unifiedStroke * sx, false);
                 break;
             case "arrow-dashed":
-                drawProArrow(gc, x1, y1, x2, y2, c, scaledSize, unifiedStroke, true);
+                drawProArrow(gc, x1, y1, x2, y2, c, scaledSize * sx, unifiedStroke * sx, true);
                 break;
             case "arrow-3d":
-                double cx3d = (x1 + x2) / 2;
-                double cy3d = Math.min(y1, y2) - Math.abs(x2 - x1) * 0.3;
-                drawCurvedArrow(gc, x1, y1, cx3d, cy3d, x2, y2, c, scaledSize, unifiedStroke);
+                // CORRECCIÓN: Usar el punto de control editado si existe
+                if (!s.getPoints().isEmpty()) {
+                    // Recuperamos el punto de control original y lo escalamos al tamaño de exportación
+                    double rawCx = s.getPoints().get(0);
+                    double rawCy = s.getPoints().get(1);
+
+                    double cx3d = (rawCx - offX) * sx;
+                    double cy3d = (rawCy - offY) * sy;
+
+                    drawCurvedArrow(gc, x1, y1, cx3d, cy3d, x2, y2, c, scaledSize * sx, unifiedStroke * sx);
+                } else {
+                    // Fallback por defecto
+                    double cx3d = (x1 + x2) / 2;
+                    double cy3d = Math.min(y1, y2) - Math.abs(x2 - x1) * 0.3;
+                    drawCurvedArrow(gc, x1, y1, cx3d, cy3d, x2, y2, c, scaledSize * sx, unifiedStroke * sx);
+                }
                 break;
             case "pen":
-                gc.setLineWidth(unifiedStroke);
+                gc.setLineWidth(unifiedStroke * sx);
                 if (s.getPoints() != null && s.getPoints().size() > 2) {
                     gc.beginPath();
                     gc.moveTo((s.getPoints().get(0) - offX) * sx, (s.getPoints().get(1) - offY) * sy);
@@ -262,19 +275,19 @@ public class CanvasRenderer {
                 }
                 break;
             case "wall":
-                gc.setLineWidth(unifiedStroke);
+                gc.setLineWidth(unifiedStroke * sx);
                 drawSimpleWall(gc, x1, y1, x2, y2, c, 80.0 * sy);
                 break;
             case "base":
-                gc.setLineWidth(unifiedStroke);
-                drawProBase(gc, x1, y1, x2, y2, c, scaledSize);
+                gc.setLineWidth(unifiedStroke * sx);
+                drawProBase(gc, x1, y1, x2, y2, c, scaledSize * sx);
                 break;
             case "spotlight":
-                drawProSpotlight(gc, x1, y1, x2, y2, c, scaledSize);
+                drawProSpotlight(gc, x1, y1, x2, y2, c, scaledSize * sx);
                 break;
             case "polygon":
                 if (s.getPoints() != null && s.getPoints().size() >= 4) {
-                    gc.setLineWidth(unifiedStroke);
+                    gc.setLineWidth(unifiedStroke * sx);
                     java.util.List<Double> scaledPts = new java.util.ArrayList<>();
                     for (int i = 0; i < s.getPoints().size(); i += 2) {
                         scaledPts.add((s.getPoints().get(i) - offX) * sx);
@@ -284,28 +297,30 @@ public class CanvasRenderer {
                 }
                 break;
             case "rect-shaded":
-                gc.setLineWidth(unifiedStroke);
+                gc.setLineWidth(unifiedStroke * sx);
                 drawShadedRect(gc, x1, y1, x2, y2, c);
                 break;
             case "text":
                 if (s.getTextValue() != null) {
-                    double fontSize = scaledSize * 2.5;
+                    // CORRECCIÓN: Escalamos la fuente con 'sx' para que mantenga proporción
+                    double fontSize = scaledSize * 2.5 * sx;
+
                     gc.setFont(Font.font("Arial", FontWeight.BOLD, fontSize));
                     gc.setStroke(Color.BLACK);
-                    gc.setLineWidth(Math.max(1.5, unifiedStroke * 0.5));
+                    gc.setLineWidth(Math.max(1.5, (unifiedStroke * 0.5) * sx));
                     gc.strokeText(s.getTextValue(), x1, y1);
                     gc.setFill(c);
                     gc.fillText(s.getTextValue(), x1, y1);
                 }
                 break;
             case "zoom-circle":
-                gc.setLineWidth(unifiedStroke);
+                gc.setLineWidth(unifiedStroke * sx);
                 if (backgroundImage != null)
                     drawRealZoom(gc, x1, y1, x2, y2, c, backgroundImage, sx,
                             0, 0, exportW, exportH, true);
                 break;
             case "zoom-rect":
-                gc.setLineWidth(unifiedStroke);
+                gc.setLineWidth(unifiedStroke * sx);
                 if (backgroundImage != null)
                     drawRealZoom(gc, x1, y1, x2, y2, c, backgroundImage, sx,
                             0, 0, exportW, exportH, false);
