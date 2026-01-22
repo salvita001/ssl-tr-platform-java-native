@@ -1,6 +1,7 @@
 package com.ssltrainingplatform.ui.renderer;
 
 import com.ssltrainingplatform.model.DrawingShape;
+import javafx.geometry.Point2D;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.effect.DropShadow;
 import javafx.scene.image.Image;
@@ -464,23 +465,141 @@ public class CanvasRenderer {
         gc.fillPolygon(new double[]{x, x3, x4}, new double[]{y, y3, y4}, 3);
     }
 
-    private void drawCurvedArrow(GraphicsContext gc, double x1, double y1, double cx, double cy, double x2, double y2, Color color, double size, double strokeWidth) {
-        gc.setStroke(color);
+    // Dibuja la punta de la flecha rotada según el ángulo
+    private void drawArrowHead(GraphicsContext gc, double tipX, double tipY, double angle, double size) {
+        // Ángulo de apertura de la punta (30 grados aprox)
+        double arrowAngle = Math.PI / 6;
+
+        // Calculamos las dos esquinas traseras de la cabeza de la flecha
+        // Restamos el ángulo porque queremos que apunte hacia atrás desde la punta
+        double x1 = tipX - size * Math.cos(angle - arrowAngle);
+        double y1 = tipY - size * Math.sin(angle - arrowAngle);
+
+        double x2 = tipX - size * Math.cos(angle + arrowAngle);
+        double y2 = tipY - size * Math.sin(angle + arrowAngle);
+
+        // Dibujamos el triángulo relleno
+        gc.fillPolygon(new double[]{tipX, x1, x2}, new double[]{tipY, y1, y2}, 3);
+    }
+
+    // =========================================================
+    //   MÉTODOS DE DIBUJO ESPECÍFICOS (NUEVA VERSIÓN CURVA CÓNICA)
+    // =========================================================
+
+    private void drawCurvedArrow(GraphicsContext gc, double x1, double y1, double cx, double cy,
+                                 double x2, double y2, Color color, double thickness, double outlineWidth) {
         gc.setFill(color);
-        gc.setLineWidth(strokeWidth);
+        gc.setStroke(color);
 
-        double angle = Math.atan2(y2 - cy, x2 - cx);
-        double headLen = size * 1.5;
-        double lineEndX = x2 - (headLen * 0.5) * Math.cos(angle);
-        double lineEndY = y2 - (headLen * 0.5) * Math.sin(angle);
+        // 1. CONFIGURACIÓN DE GROSORES
+        double startFactor = 0.5;
+        double endFactor = 1.5;
+        double startThickness = thickness * startFactor;
+        double endThickness = thickness * endFactor;
+
+        // Tamaño visual de la punta de flecha
+        double arrowSize = endThickness * 3.0;
+
+        // 2. CÁLCULO DINÁMICO DEL CORTE (AJUSTADO)
+        // Estimamos la longitud de la curva
+        double dist1 = Math.sqrt(Math.pow(cx - x1, 2) + Math.pow(cy - y1, 2));
+        double dist2 = Math.sqrt(Math.pow(x2 - cx, 2) + Math.pow(y2 - cy, 2));
+        double estLength = dist1 + dist2;
+        if (estLength < 1) estLength = 1;
+
+        // --- CORRECCIÓN AQUÍ ---
+        // Antes usábamos 0.8, lo que cortaba el cuerpo demasiado pronto.
+        // Usamos 0.35 para que el cuerpo entre profundamente en la cabeza (triángulo).
+        // Como el cuerpo es del mismo color que la cabeza, el solapamiento no se ve,
+        // pero garantiza que no haya huecos blancos.
+        double tReduction = (arrowSize * 0.35) / estLength;
+
+        // Evitamos que tReduction sea negativo o absurdo si la flecha es microscópica
+        if (tReduction > 0.5) tReduction = 0.5;
+
+        double tEndBody = 1.0 - tReduction;
+
+        // 3. DIBUJAR EL CUERPO CÓNICO
+        int steps = 60;
+        double[] leftSideX = new double[steps + 1];
+        double[] leftSideY = new double[steps + 1];
+        double[] rightSideX = new double[steps + 1];
+        double[] rightSideY = new double[steps + 1];
+
+        for (int i = 0; i <= steps; i++) {
+            double ratio = (double) i / steps;
+
+            // Aplicamos el corte dinámico
+            double t = ratio * tEndBody;
+
+            // Grosor interpolado
+            double currentThickness = startThickness + ratio * (endThickness - startThickness);
+
+            Point2D p = calculateBezierPoint(t, x1, y1, cx, cy, x2, y2);
+            Point2D tangent = calculateBezierTangent(t, x1, y1, cx, cy, x2, y2);
+
+            // Normales
+            double len = Math.sqrt(tangent.getX() * tangent.getX() + tangent.getY() * tangent.getY());
+            if (len == 0) len = 1;
+            double dx = tangent.getX() / len;
+            double dy = tangent.getY() / len;
+            double nx = -dy;
+            double ny = dx;
+
+            double halfWidth = currentThickness / 2.0;
+
+            leftSideX[i] = p.getX() + nx * halfWidth;
+            leftSideY[i] = p.getY() + ny * halfWidth;
+            rightSideX[i] = p.getX() - nx * halfWidth;
+            rightSideY[i] = p.getY() - ny * halfWidth;
+        }
+
+        // Construir polígono
         gc.beginPath();
-        gc.moveTo(x1, y1);
-        gc.quadraticCurveTo(cx, cy, lineEndX, lineEndY);
-        gc.stroke();
-        drawArrowHead(gc, x2, y2, angle, size, color);
+        gc.moveTo(leftSideX[0], leftSideY[0]);
+        for (int i = 1; i <= steps; i++) {
+            gc.lineTo(leftSideX[i], leftSideY[i]);
+        }
+        for (int i = steps; i >= 0; i--) {
+            gc.lineTo(rightSideX[i], rightSideY[i]);
+        }
+        gc.closePath();
+        gc.fill();
 
-        double dotSize = strokeWidth * 2.0;
-        gc.fillOval(x1 - dotSize/2, y1 - dotSize/2, dotSize, dotSize);
+        // 4. DIBUJAR LA PUNTA (En el final real t=1.0)
+        Point2D endTangent = calculateBezierTangent(1.0, x1, y1, cx, cy, x2, y2);
+        double angle = Math.atan2(endTangent.getY(), endTangent.getX());
+
+        drawArrowHead(gc, x2, y2, angle, arrowSize);
+    }
+
+    // --- HELPERS MATEMÁTICOS PARA LA CURVA BEZIER ---
+
+    // Calcula un punto P(t) en la curva cuadrática
+    private Point2D calculateBezierPoint(double t, double x1, double y1, double cx, double cy, double x2, double y2) {
+        double u = 1 - t;
+        double tt = t * t;
+        double uu = u * u;
+
+        double pX = uu * x1 + 2 * u * t * cx + tt * x2;
+        double pY = uu * y1 + 2 * u * t * cy + tt * y2;
+
+        return new Point2D(pX, pY);
+    }
+
+    // Calcula el vector tangente (derivada) en el punto t
+    private Point2D calculateBezierTangent(double t, double x1, double y1, double cx, double cy, double x2, double y2) {
+        // Derivada de Bezier Cuadrática: B'(t) = 2(1-t)(P1-P0) + 2t(P2-P1)
+        // Usando P0=(x1,y1), P1=(cx,cy), P2=(x2,y2)
+        double v1x = cx - x1;
+        double v1y = cy - y1;
+        double v2x = x2 - cx;
+        double v2y = y2 - cy;
+
+        double tx = 2 * (1 - t) * v1x + 2 * t * v2x;
+        double ty = 2 * (1 - t) * v1y + 2 * t * v2y;
+
+        return new Point2D(tx, ty);
     }
 
     private void drawSimpleWall(GraphicsContext gc, double x1, double y1, double x2, double y2, Color c, double wallHeight) {

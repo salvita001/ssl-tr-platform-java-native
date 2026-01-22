@@ -192,6 +192,9 @@ public class EditorController {
     private boolean isSeeking = false;
     private Double pendingSeekTime = null;
 
+    // Variable para fijar la línea gris al ratón
+    private double rawMouseX = -1;
+
     // =========================================================================
     //                               INICIALIZACIÓN
     // =========================================================================
@@ -392,22 +395,34 @@ public class EditorController {
         });
 
         timelineCanvas.setOnMouseMoved(e -> {
-            // Calcular tiempo
+
+            // SI EL VÍDEO ESTÁ EN PLAY, SALIMOS ---
+            // Esto evita que aparezca la línea y evita que el 'seek' interrumpa la reproducción.
+            if (videoService.isPlaying()) {
+                hoverTime = -1;
+                rawMouseX = -1;
+                return;
+            }
+            // 1. Guardamos la posición EXACTA del ratón
+            rawMouseX = e.getX();
+
+            // 2. Calculamos el tiempo (para la etiqueta y el video)
             double scrollOffset = timelineScroll.getValue();
             hoverTime = (e.getX() + scrollOffset) / pixelsPerSecond;
 
-            // ✅ CAMBIO: Ya no usamos "if (now - last > 33)".
-            // Llamamos directamente al método smart. Él gestionará la velocidad máxima.
-            previewVideoSmart(hoverTime);
-
+            // 3. ¡IMPORTANTE! Dibujamos la línea PRIMERO (Prioridad visual máxima)
             redrawTimeline();
+
+            // 4. Luego pedimos el video (Smart Seek)
+            previewVideoSmart(hoverTime);
         });
 
         timelineCanvas.setOnMouseExited(e -> {
             hoverTime = -1;
+            rawMouseX = -1; // Reseteamos al salir
 
-            // 3. AL SALIR: El video vuelve a la posición real de la aguja roja
-            previewVideoOnly(currentTimelineTime);
+            // AL SALIR: El video vuelve a la aguja roja
+            previewVideoSmart(currentTimelineTime); // Usamos smart seek también aquí
 
             redrawTimeline();
         });
@@ -439,20 +454,33 @@ public class EditorController {
 
     }
 
-    // Mueve el video solo si el motor está libre. Si no, guarda la petición.
+    // Método inteligente MEJORADO: Con límite de velocidad (30 FPS max)
     private void previewVideoSmart(double time) {
         // 1. Validar límites
         double totalDur = timelineManager.getTotalDuration();
         if (time < 0) time = 0;
         if (time > totalDur) time = totalDur;
 
-        // 2. Si el motor está ocupado cargando un frame anterior...
-        if (isSeeking) {
-            pendingSeekTime = time; // ...guardamos este tiempo para ir después
-            return;                 // y salimos sin molestar al motor.
+        // 2. LIMITADOR DE VELOCIDAD (Throttle)
+        // Si han pasado menos de 30ms desde la última petición, ignoramos esta
+        // para no saturar el hilo de eventos (que es lo que causa el lag visual).
+        long now = System.currentTimeMillis();
+        if (now - lastScrubTime < 33) {
+            // Guardamos la intención por si acaso es el último movimiento del ratón
+            // pero no saturamos el motor.
+            pendingSeekTime = time;
+            return;
         }
 
-        // 3. Si está libre, calculamos y movemos
+        // 3. Si el motor está ocupado físicamente, también esperamos
+        if (isSeeking) {
+            pendingSeekTime = time;
+            return;
+        }
+
+        // 4. Si todo está libre y ha pasado el tiempo, procedemos
+        lastScrubTime = now; // Marcamos el tiempo
+
         VideoSegment targetSeg = timelineManager.getSegmentAt(time);
         double totalOrgDur = timelineManager.getTotalOriginalDuration();
         double seekTarget = 0;
@@ -468,7 +496,7 @@ public class EditorController {
         }
 
         if (totalOrgDur > 0) {
-            isSeeking = true; // Bloqueamos hasta que llegue la imagen
+            isSeeking = true;
             ignoreUpdatesUntil = 0;
             videoService.seek((seekTarget / totalOrgDur) * 100.0);
         }
@@ -1770,33 +1798,22 @@ public class EditorController {
         // 5. DIBUJAR REGLA Y CABEZAL
         drawRulerAndPlayhead(w, h, scrollOffset);
 
-        if (hoverTime >= 0 && hoverTime <= timelineManager.getTotalDuration()) {
-            double hX = (hoverTime * pixelsPerSecond) - scrollOffset;
+        // 6. LÍNEA GRIS (Hover)
+        // AÑADIMOS "!videoService.isPlaying() &&" AL PRINCIPIO
+        if (!videoService.isPlaying() && hoverTime >= 0 && hoverTime <= timelineManager.getTotalDuration()) {
+            double hX;
+
+            // Si tenemos la posición real del ratón, usamos esa (Pegamento)
+            // Si no (ej. se mueve por código), usamos la fórmula matemática
+            if (rawMouseX >= 0) {
+                hX = rawMouseX;
+            } else {
+                hX = (hoverTime * pixelsPerSecond) - scrollOffset;
+            }
 
             gcTimeline.setStroke(Color.web("#ffffff", 0.4));
             gcTimeline.setLineWidth(1.0);
             gcTimeline.strokeLine(hX, 0, hX, h);
-
-            /*String timeText = formatPreciseTime(hoverTime);
-
-            gcTimeline.setFont(Font.font("Arial", FontWeight.BOLD, 10));
-            Text temp = new Text(timeText);
-            temp.setFont(gcTimeline.getFont());
-            double txtW = temp.getLayoutBounds().getWidth();
-
-            double rectW = txtW + 10;
-            double rectH = 16;
-            double rectX = hX - (rectW / 2);
-            double rectY = 12;
-
-            gcTimeline.setFill(Color.web("#1a1a1a", 0.9));
-            gcTimeline.fillRoundRect(rectX, rectY, rectW, rectH, 5, 5);
-
-            gcTimeline.setStroke(Color.web("#ffffff", 0.2));
-            gcTimeline.strokeRoundRect(rectX, rectY, rectW, rectH, 5, 5);
-
-            gcTimeline.setFill(Color.WHITE);
-            gcTimeline.fillText(timeText, rectX + 5, rectY + 12);*/
         }
     }
 
@@ -1811,6 +1828,7 @@ public class EditorController {
 
         double arcSize = 10;
 
+        // 1. Dibujar forma base
         gc.beginPath();
         gc.moveTo(x + arcSize, y);
         gc.lineTo(x + w - arcSize, y);
@@ -1831,21 +1849,36 @@ public class EditorController {
         if (hasImages) {
             double step = 5.0;
             double startSource = seg.getSourceStartTime();
+
+            // --- OPTIMIZACIÓN DE RENDIMIENTO (FALTABA ESTO) ---
+            // Solo dibujamos las miniaturas que caben en pantalla
+            double scrollVal = timelineScroll.getValue();
+            double canvasW = timelineCanvas.getWidth();
+            double visibleMinX = scrollVal;
+            double visibleMaxX = scrollVal + canvasW;
+            double clipAbsStart = seg.getStartTime() * pixelsPerSecond;
+
             double endSource = seg.getSourceEndTime();
             double firstSample = Math.floor(startSource / step) * step;
 
             for (double t = firstSample; t < endSource + step; t += step) {
+                double timeOffset = t - startSource;
+                double imgX_Virtual = clipAbsStart + (timeOffset * pixelsPerSecond);
+                double imgW = step * pixelsPerSecond;
+
+                // SI NO SE VE, NO SE DIBUJA (Culling)
+                if (imgX_Virtual + imgW < visibleMinX || imgX_Virtual > visibleMaxX) {
+                    continue;
+                }
+
                 var entry = filmstripMap.floorEntry(t);
                 if (entry != null) {
                     Image img = entry.getValue();
-                    double timeOffset = entry.getKey() - startSource;
-                    double pixelOffset = timeOffset * pixelsPerSecond;
-                    double imgX = x + pixelOffset;
-                    double imgW = step * pixelsPerSecond;
-
-                    gc.drawImage(img, imgX, y, imgW, h);
+                    double relativeX = x + (timeOffset * pixelsPerSecond);
+                    gc.drawImage(img, relativeX, y, imgW, h);
                 }
             }
+
             gc.setFill(new Color(c.getRed(), c.getGreen(), c.getBlue(), 0.35 * alpha));
             gc.fillRect(x, y, w, h);
         } else {
@@ -1855,6 +1888,7 @@ public class EditorController {
 
         gc.restore();
 
+        // 2. Borde y Texto (Igual que antes)
         gc.beginPath();
         gc.moveTo(x + arcSize, y);
         gc.lineTo(x + w - arcSize, y);
@@ -1882,11 +1916,9 @@ public class EditorController {
         if (w > 40) {
             String label = String.format("%.1fs", seg.getDuration());
             if (seg.isFreezeFrame()) label = "❄ " + label;
-
             Text tempText = new Text(label);
             tempText.setFont(gc.getFont());
             double textWidth = tempText.getLayoutBounds().getWidth();
-
             gc.fillText(label, x + (w - textWidth)/2, y + h/2 + 4);
         }
 
@@ -2472,6 +2504,8 @@ public class EditorController {
     }
 
     private void onTimelineDragged(MouseEvent e) {
+        rawMouseX = e.getX();
+
         double canvasW = timelineCanvas.getWidth();
         double edgeThreshold = 70.0;
         double scrollOffset = timelineScroll.getValue();
